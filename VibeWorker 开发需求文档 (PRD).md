@@ -104,8 +104,43 @@ _注意：_`_location_`_ 使用相对路径。_
 ### 3. Agent Skills 的一些特性
 #### 3.1 兼容Claude Code
 本工程的Agent Skills 需要能兼容本地的Claude Code插件（即如果本地安装了ClaudeCode，同样允许用户可以使用到安装在ClaudeCode里的Skill，如果用户没有安装Claude Code则无影响）
-#### 3.2 提供Skills商店
-提供一个Skills商店，可以浏览skill.sh(https://skills.sh/)以及OpenclawHub(https://openclaw-hub.com/showcase)里的插件并快捷进行安装
+
+#### 3.2 技能商店 (Skills Store) ✅ 已实现
+提供一个技能商店，集成 [skills.sh](https://skills.sh/) 生态系统：
+
+**功能特性：**
+- 浏览 500+ 社区技能
+- 按分类筛选（工具、数据、网络、自动化、集成等）
+- 关键词搜索技能
+- 一键安装到本地 `skills/` 目录
+- 分页展示（每页 12 个技能）
+- 查看技能详情和 SKILL.md 内容
+
+**技术实现：**
+- 后端 `backend/store/` 模块负责与 skills.sh 交互
+- 从 skills.sh 页面提取技能数据（通过正则匹配嵌入的 JSON）
+- 从 GitHub 原始内容获取 SKILL.md 文件
+- 前端 `frontend/src/components/store/` 提供商店 UI
+
+**CLI 工具：**
+```bash
+# Linux/macOS
+./scripts/skills.sh list              # 列出本地技能
+./scripts/skills.sh search <query>    # 搜索远程技能
+./scripts/skills.sh install <name>    # 安装技能
+
+# Windows
+scripts\skills.bat list
+scripts\skills.bat search <query>
+scripts\skills.bat install <name>
+```
+
+#### 3.3 技能翻译功能 ✅ 已实现
+编辑器支持一键将 SKILL.md 文件翻译为中文：
+- 点击翻译按钮，调用 LLM 进行智能翻译
+- 仅翻译描述性内容，保留代码块、URL、变量名等
+- 翻译过程中显示加载动画
+- 支持撤销更改恢复原文
 
 
 ## 四、mini OpenClaw 对话记忆管理系统设计
@@ -204,6 +239,27 @@ System Prompt 由以下 6 部分动态拼接而成（按顺序）：
 ### 7. 健康检查
 + **Endpoint**: `GET /api/health` - 返回后端状态、版本号和当前模型名称。
 
+### 8. 技能商店接口 ✅ 已实现
++ **Endpoint**: `GET /api/store/skills` - 获取远程技能列表。
+    - Query 参数：`category`（分类筛选）、`page`（页码）、`page_size`（每页数量）
+    - 返回：技能列表、总数、版本号
++ **Endpoint**: `GET /api/store/search` - 搜索技能。
+    - Query 参数：`q`（搜索关键词）
+    - 返回：匹配的技能列表
++ **Endpoint**: `GET /api/store/skills/{name}` - 获取技能详情。
+    - 返回：技能元数据、SKILL.md 内容、所需工具等
++ **Endpoint**: `POST /api/store/install` - 安装技能。
+    - Body: `{ "skill_name": "...", "version": "..." }`
+    - 返回：安装状态和消息
++ **Endpoint**: `POST /api/skills/{skill_name}/update` - 更新已安装技能。
++ **Endpoint**: `GET /api/store/categories` - 获取可用分类列表。
+
+### 9. 翻译接口 ✅ 已实现
++ **Endpoint**: `POST /api/translate` - 翻译内容为中文。
+    - Body: `{ "content": "...", "target_language": "zh-CN" }`
+    - 返回：`{ "status": "ok", "translated": "...", "source_language": "en", "target_language": "zh-CN" }`
+    - 说明：使用 LLM 进行智能翻译，仅翻译描述性文本，保留代码块和技术标识符。
+
 ## 六、前端开发要求
 ### 1. 设计理念与布局架构
 前端采用 **IDE（集成开发环境）风格**，**可拖拽调整宽度的三栏式布局**。
@@ -250,22 +306,25 @@ System Prompt 由以下 6 部分动态拼接而成（按顺序）：
 建议 Claude Code 按照以下结构进行初始化：
 
 ```plain
-mini-openclaw/
+vibeworker/
 ├── backend/                # FastAPI + LangChain/LangGraph
 │   ├── app.py              # 入口文件 (Port 8088)
 │   ├── config.py           # Pydantic Settings 配置管理
 │   ├── prompt_builder.py   # System Prompt 动态拼接
 │   ├── sessions_manager.py # 会话管理器
 │   ├── .env                # 环境变量 (API Key 等)
+│   ├── store/              # 技能商店模块 ✅
+│   │   ├── __init__.py     # SkillsStore 核心逻辑 (skills.sh 集成)
+│   │   └── models.py       # Pydantic 模型 (RemoteSkill, SkillDetail 等)
 │   ├── memory/             # 记忆存储
 │   │   ├── logs/           # Daily logs
 │   │   └── MEMORY.md       # Core memory
 │   ├── sessions/           # JSON 会话记录
-│   ├── skills/             # Agent Skills 文件夹
+│   ├── skills/             # Agent Skills 文件夹 (本地已安装技能)
 │   ├── workspace/          # System Prompts (SOUL.md, AGENTS.md, etc.)
 │   ├── tools/              # Core Tools 实现
 │   ├── graph/              # LangGraph Agent 编排
-│   │   └── agent.py        # create_react_agent 配置
+│   │   └── agent.py        # create_agent 配置
 │   ├── knowledge/          # RAG 知识库文档存放
 │   ├── storage/            # 索引持久化存储
 │   └── requirements.txt
@@ -278,13 +337,21 @@ mini-openclaw/
 │   │   │   └── globals.css # 全局 CSS 主题与组件样式
 │   │   ├── components/
 │   │   │   ├── chat/       # ChatPanel (对话流 + 工具调用可视化)
-│   │   │   ├── sidebar/    # Sidebar (会话/记忆/技能导航)
-│   │   │   ├── editor/     # InspectorPanel (Monaco Editor)
+│   │   │   ├── sidebar/    # Sidebar (会话/记忆/技能导航 + 商店入口)
+│   │   │   ├── editor/     # InspectorPanel (Monaco Editor + 翻译功能)
+│   │   │   ├── store/      # 技能商店组件 ✅
+│   │   │   │   ├── SkillsStoreDialog.tsx  # 商店弹窗主组件
+│   │   │   │   ├── SkillCard.tsx          # 技能卡片
+│   │   │   │   └── SkillDetail.tsx        # 技能详情页
 │   │   │   ├── settings/   # SettingsDialog (模型配置弹窗)
-│   │   │   └── ui/         # Shadcn/UI 基础组件 (Button, Tooltip, Dialog...)
+│   │   │   └── ui/         # Shadcn/UI 基础组件
 │   │   └── lib/
-│   │       └── api.ts      # API 客户端 (Chat, Sessions, Files, Settings...)
+│   │       └── api.ts      # API 客户端 (含 Store/Translate API)
 │   └── package.json
+│
+├── scripts/                # CLI 工具 ✅
+│   ├── skills.sh           # Linux/macOS 技能管理脚本
+│   └── skills.bat          # Windows 技能管理脚本
 │
 └── README.md
 ```
