@@ -81,8 +81,11 @@ async def run_agent(
 
     input_state = {"messages": messages}
 
+    # Config with increased recursion limit (default is 25)
+    config = {"recursion_limit": settings.agent_recursion_limit}
+
     if stream:
-        async for event in agent.astream_events(input_state, version="v2"):
+        async for event in agent.astream_events(input_state, version="v2", config=config):
             kind = event.get("event", "")
 
             if kind == "on_chat_model_stream":
@@ -118,7 +121,7 @@ async def run_agent(
 
     else:
         # Non-streaming mode
-        result = await agent.ainvoke(input_state)
+        result = await agent.ainvoke(input_state, config=config)
         final_messages = result.get("messages", [])
         if final_messages:
             last_msg = final_messages[-1]

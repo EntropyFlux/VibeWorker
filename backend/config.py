@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     # System Prompt constraints
     max_prompt_chars: int = 20000
 
+    # Agent execution limits
+    agent_recursion_limit: int = 100  # Max tool calls per request (default was 25)
+
     # Claude Code Skills compatibility
     claude_code_skills_dir: Optional[Path] = None
 
