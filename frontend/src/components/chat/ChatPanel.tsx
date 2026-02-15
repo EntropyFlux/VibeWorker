@@ -205,6 +205,7 @@ export default function ChatPanel({
     const [streamingContent, setStreamingContent] = useState("");
     const [thinkingSteps, setThinkingSteps] = useState<ThinkingStep[]>([]);
     const [expandedTools, setExpandedTools] = useState<Set<number>>(new Set());
+    const [expandedStreamingTools, setExpandedStreamingTools] = useState<Set<number>>(new Set());
     const abortRef = useRef(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -225,6 +226,7 @@ export default function ChatPanel({
         setIsStreaming(true);
         setStreamingContent("");
         setThinkingSteps([]);
+        setExpandedStreamingTools(new Set());
         abortRef.current = false;
 
         // Add user message
@@ -328,6 +330,15 @@ export default function ChatPanel({
         });
     };
 
+    const toggleStreamingToolExpand = (index: number) => {
+        setExpandedStreamingTools((prev) => {
+            const next = new Set(prev);
+            if (next.has(index)) next.delete(index);
+            else next.add(index);
+            return next;
+        });
+    };
+
     return (
         <div className="flex flex-col h-full">
             {/* Messages Area */}
@@ -412,27 +423,71 @@ export default function ChatPanel({
                 {/* Streaming response */}
                 {isStreaming && (
                     <div className="mb-4 animate-fade-in-up">
-                        {/* Live thinking steps */}
+                        {/* Live thinking steps - grouped by tool */}
                         {thinkingSteps.length > 0 && (
-                            <div className="mb-3 space-y-1">
-                                {thinkingSteps.map((step, i) => (
-                                    <div
-                                        key={i}
-                                        className="flex items-center gap-2 text-xs text-muted-foreground"
-                                    >
-                                        <div
-                                            className={`w-1.5 h-1.5 rounded-full ${step.type === "tool_start"
-                                                ? "bg-amber-500 animate-pulse-soft"
-                                                : "bg-green-500"
-                                                }`}
-                                        />
-                                        <span>
-                                            {step.type === "tool_start"
-                                                ? `${getToolDisplay(step.tool).icon} ${getToolDisplay(step.tool).label}：${getToolInputSummary(step.tool, step.input)}`
-                                                : `✅ ${getToolDisplay(step.tool).label} 完成`}
-                                        </span>
-                                    </div>
-                                ))}
+                            <div className="mb-3 space-y-2">
+                                {(() => {
+                                    // Group steps into tool calls with input/output
+                                    const toolGroups: { tool: string; input?: string; output?: string; isComplete: boolean }[] = [];
+                                    for (const step of thinkingSteps) {
+                                        if (step.type === "tool_start") {
+                                            toolGroups.push({
+                                                tool: step.tool,
+                                                input: step.input,
+                                                isComplete: false,
+                                            });
+                                        } else if (step.type === "tool_end") {
+                                            // Find matching tool_start and add output
+                                            for (let i = toolGroups.length - 1; i >= 0; i--) {
+                                                if (toolGroups[i].tool === step.tool && !toolGroups[i].isComplete) {
+                                                    toolGroups[i].output = step.output;
+                                                    toolGroups[i].isComplete = true;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    return toolGroups.map((tc, j) => (
+                                        <div key={j} className="tool-call-card">
+                                            <div
+                                                className="tool-call-header cursor-pointer"
+                                                onClick={() => toggleStreamingToolExpand(j)}
+                                            >
+                                                <div className={`w-2 h-2 rounded-full ${tc.isComplete ? "bg-green-500" : "bg-amber-500 animate-pulse-soft"}`} />
+                                                <span className="text-xs font-medium text-muted-foreground">
+                                                    {getToolDisplay(tc.tool).icon} {getToolDisplay(tc.tool).label}
+                                                </span>
+                                                <span className="text-xs text-muted-foreground/60 truncate flex-1 font-mono">
+                                                    {getToolInputSummary(tc.tool, tc.input)}
+                                                </span>
+                                                <span className="text-xs text-muted-foreground/40">
+                                                    {expandedStreamingTools.has(j) ? "▼" : "▶"}
+                                                </span>
+                                            </div>
+                                            {expandedStreamingTools.has(j) && (
+                                                <div className="tool-call-body animate-fade-in-up">
+                                                    {tc.input && (
+                                                        <div className="mb-2.5">
+                                                            <div className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-semibold mb-1">输入</div>
+                                                            <ToolInputDisplay toolName={tc.tool} input={tc.input} />
+                                                        </div>
+                                                    )}
+                                                    {tc.output ? (
+                                                        <div>
+                                                            <div className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-semibold mb-1">输出</div>
+                                                            <ToolOutputDisplay toolName={tc.tool} output={tc.output} />
+                                                        </div>
+                                                    ) : (
+                                                        <div className="flex items-center gap-2 text-xs text-muted-foreground/50">
+                                                            <div className="w-3 h-3 border-2 border-amber-500/30 border-t-amber-500 rounded-full animate-spin" />
+                                                            执行中...
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ));
+                                })()}
                             </div>
                         )}
                         {streamingContent && (
