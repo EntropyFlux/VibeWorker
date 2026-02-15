@@ -364,6 +364,7 @@ export interface TranslateResponse {
   translated: string;
   source_language: string;
   target_language: string;
+  model: string;
 }
 
 export async function translateContent(

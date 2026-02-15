@@ -9,7 +9,7 @@ import {
     TooltipContent,
     TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { fetchFile, saveFile, translateContent } from "@/lib/api";
+import { fetchFile, saveFile, translateContent, fetchSettings } from "@/lib/api";
 
 // Lazy-load Monaco to avoid SSR issues
 const MonacoEditor = dynamic(
@@ -31,6 +31,7 @@ export default function InspectorPanel({
     const [isLoading, setIsLoading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [isTranslating, setIsTranslating] = useState(false);
+    const [translateModel, setTranslateModel] = useState("");
     const [hasChanges, setHasChanges] = useState(false);
     const [saveStatus, setSaveStatus] = useState<
         "idle" | "saving" | "saved" | "error"
@@ -84,7 +85,13 @@ export default function InspectorPanel({
         if (isTranslating || !content.trim()) return;
 
         setIsTranslating(true);
+        setTranslateModel("");
         try {
+            // Get settings to show which model will be used
+            const settings = await fetchSettings();
+            const modelName = settings.translate_model || settings.llm_model || "unknown";
+            setTranslateModel(modelName);
+
             const result = await translateContent(content, "zh-CN");
             setContent(result.translated);
             setHasChanges(result.translated !== originalContent);
@@ -244,6 +251,11 @@ export default function InspectorPanel({
                         <div className="absolute inset-0 bg-background/80 backdrop-blur-sm z-10 flex flex-col items-center justify-center gap-3">
                             <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
                             <span className="text-sm text-muted-foreground">正在翻译中，请稍候...</span>
+                            {translateModel && (
+                                <span className="text-xs text-muted-foreground/70">
+                                    使用模型: <span className="font-mono text-blue-500">{translateModel}</span>
+                                </span>
+                            )}
                         </div>
                     )}
                     <MonacoEditor

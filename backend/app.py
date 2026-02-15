@@ -566,6 +566,7 @@ async def translate_content(request: TranslateRequest):
             "translated": translated,
             "source_language": "auto",
             "target_language": request.target_language,
+            "model": model,
         }
     except Exception as e:
         logger.error(f"Translation failed: {e}")
