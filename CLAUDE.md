@@ -19,6 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | **前端框架** | Next.js 14+ (App Router) |
 | **UI 组件库** | Shadcn/UI + Tailwind CSS v4 |
 | **代码编辑器** | Monaco Editor |
+| **MCP 集成** | MCP Python SDK (Anthropic 官方) |
 | **存储方案** | 本地文件系统（无 MySQL/Redis 等重依赖） |
 
 ## 开发命令速查
@@ -99,6 +100,7 @@ npm lint       # 运行 ESLint
 | **LLM 缓存** | ❌ 关闭 | 24 小时 | `.cache/llm/` | Agent 响应（含流式模拟） |
 | **Prompt 缓存** | ✅ 开启 | 10 分钟 | `.cache/prompt/` | System Prompt 拼接结果 |
 | **翻译缓存** | ✅ 开启 | 7 天 | `.cache/translate/` | 翻译 API 结果 |
+| **MCP 工具缓存** | ✅ 开启 | 1 小时 | `.cache/tool_mcp_*/` | MCP 工具调用结果（自动按工具名分目录） |
 
 **注意：**
 - `.cache/` 目录已添加到 `.gitignore`，不会上传到 git
@@ -122,6 +124,7 @@ npm lint       # 运行 ESLint
    - LLM 缓存：`SHA256(system_prompt_hash + recent_history + message + model + temperature)`
    - Prompt 缓存：`SHA256(workspace_files_mtime)`
    - 翻译缓存：`SHA256(content + target_language)`
+   - MCP 工具缓存：`SHA256(tool_name + json(args))`
 
 **流式缓存处理：**
 
@@ -139,6 +142,7 @@ ENABLE_URL_CACHE=true
 ENABLE_LLM_CACHE=false          # 默认关闭
 ENABLE_PROMPT_CACHE=true
 ENABLE_TRANSLATE_CACHE=true
+MCP_ENABLED=true                # MCP 模块总开关
 
 URL_CACHE_TTL=3600              # 1 hour
 LLM_CACHE_TTL=86400             # 24 hours
@@ -147,6 +151,7 @@ TRANSLATE_CACHE_TTL=604800      # 7 days
 
 CACHE_MAX_MEMORY_ITEMS=100
 CACHE_MAX_DISK_SIZE_MB=5120     # 5GB
+MCP_TOOL_CACHE_TTL=3600         # 1 hour (MCP 工具缓存 TTL)
 ```
 
 **管理 API：**
@@ -219,7 +224,86 @@ description: 技能中文描述     # 一句话概括功能
 - 若本地有 Claude Code，Agent 可同时使用其 Skills
 - 若无 Claude Code，也不影响运行
 
-### 4. System Prompt 动态拼接
+### 5. MCP (Model Context Protocol) 集成
+
+**关键文件：** `backend/mcp_module/`
+
+**概述：** VibeWorker 作为 MCP Client，连接外部 MCP Server，将其暴露的工具动态注入到 Agent 中。
+
+**模块结构：**
+```
+backend/mcp_module/
+├── __init__.py          # 导出 MCPManager 单例（mcp_manager）
+├── config.py            # mcp_servers.json 配置读写
+├── manager.py           # MCPManager: 连接管理、工具发现、生命周期
+└── tool_wrapper.py      # MCP 工具 → LangChain StructuredTool 包装（含 L1+L2 缓存）
+```
+
+**配置文件：** `backend/mcp_servers.json`
+```json
+{
+  "servers": {
+    "filesystem": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"],
+      "env": {},
+      "enabled": true,
+      "description": "本地文件系统访问"
+    },
+    "brave-search": {
+      "transport": "sse",
+      "url": "http://localhost:3001/sse",
+      "headers": {},
+      "enabled": true,
+      "description": "Brave 搜索引擎"
+    }
+  }
+}
+```
+
+**支持的传输方式：**
+- `stdio`：本地进程（command + args + env）
+- `sse`：远程 HTTP（url + headers）
+
+**MCPManager 核心方法：**
+| 方法 | 功能 |
+|------|------|
+| `initialize()` | 启动时连接所有 enabled 的 server |
+| `shutdown()` | 关闭所有连接 |
+| `connect_server(name)` | 连接指定 server |
+| `disconnect_server(name)` | 断开指定 server |
+| `get_all_mcp_tools()` | 返回所有已连接 server 的 LangChain 工具 |
+| `get_server_status()` | 返回各 server 状态 |
+| `get_server_tools(name)` | 返回指定 server 的工具列表 |
+
+**工具包装机制：**
+- 每个 MCP 工具 → 一个独立的 LangChain `StructuredTool`
+- 工具名格式：`mcp_{server_name}_{tool_name}`（避免与 Core Tools 命名冲突）
+- 工具描述直接使用 MCP 工具的 description
+- 调用时通过 MCPManager 转发到对应的 MCP Server session
+
+**缓存集成：**
+- 每个 MCP 工具有独立的 L1（内存）+ L2（磁盘）缓存
+- 缓存目录：`.cache/tool_mcp_{server}_{tool}/`
+- TTL 使用 `MCP_TOOL_CACHE_TTL` 配置（默认 1 小时）
+- 命中时返回 `[CACHE_HIT]` 前缀标记
+
+**工具注入：**
+- `backend/tools/__init__.py` 的 `get_all_tools()` 自动追加 MCP 工具
+- MCP 不可用时不影响 7 个 Core Tools
+
+**生命周期（app.py lifespan）：**
+- 启动时：`mcp_manager.initialize()`（连接所有 enabled server）
+- 关闭时：`mcp_manager.shutdown()`（优雅断开所有连接）
+- 连接状态：`disconnected` → `connecting` → `connected` / `error`
+- 单个 server 错误不影响其他 server 或 Core Tools
+
+**注意事项：**
+- 模块目录为 `mcp_module/`（非 `mcp/`），避免与 pip 包 `mcp` 的 import 冲突
+- `from mcp import ClientSession` 引用的是 pip 包，`from mcp_module import mcp_manager` 引用的是本地模块
+
+### 6. System Prompt 动态拼接
 
 **文件位置：** `backend/workspace/`
 
@@ -263,7 +347,7 @@ System Prompt 由以下部分顺序拼接而成（按顺序）：
 （省略，详见 backend/workspace/AGENTS.md）
 ```
 
-### 5. 会话管理
+### 7. 会话管理
 
 **会话存储：** `backend/sessions/{session_name}.json`
 
@@ -276,7 +360,7 @@ System Prompt 由以下部分顺序拼接而成（按顺序）：
 ]
 ```
 
-### 6. 配置管理
+### 8. 配置管理
 
 **文件：** `backend/config.py`（Pydantic Settings）
 
@@ -289,6 +373,7 @@ System Prompt 由以下部分顺序拼接而成（按顺序）：
 - `embedding_api_key`、`embedding_api_base`、`embedding_model`：向量模型配置
 - 目录路径：`memory_dir`, `sessions_dir`, `skills_dir`, `workspace_dir`, `knowledge_dir`, `storage_dir`
 - 记忆配置：`memory_auto_extract`(自动提取), `memory_daily_log_days`(日志天数), `memory_max_prompt_tokens`(Token预算), `memory_index_enabled`(索引开关)
+- MCP 配置：`mcp_enabled`(MCP 总开关), `mcp_tool_cache_ttl`(工具缓存 TTL)
 
 **环境变量优先级：**
 - 优先读取 `.env` 文件中的 `LLM_API_KEY` 等
@@ -350,13 +435,25 @@ GET  /api/memory/stats                   # 记忆统计信息
 POST /api/memory/reindex                 # 强制重建记忆索引
 ```
 
-### 7. 设置管理接口
+### 7. MCP 管理接口
 ```
-GET /api/settings                         # 获取配置（从 .env 读取，含记忆配置）
+GET  /api/mcp/servers                    # 列出所有 MCP Server 及状态
+POST /api/mcp/servers/{name}             # 添加新 MCP Server
+PUT  /api/mcp/servers/{name}             # 更新 MCP Server 配置
+DELETE /api/mcp/servers/{name}           # 删除 MCP Server
+POST /api/mcp/servers/{name}/connect     # 手动连接
+POST /api/mcp/servers/{name}/disconnect  # 手动断开
+GET  /api/mcp/tools                      # 列出所有已发现的 MCP 工具
+GET  /api/mcp/servers/{name}/tools       # 列出指定 Server 的工具
+```
+
+### 8. 设置管理接口
+```
+GET /api/settings                         # 获取配置（从 .env 读取，含记忆/缓存/MCP 配置）
 PUT /api/settings                         # 更新配置（写入 .env，需重启后端生效）
 ```
 
-### 8. 健康检查
+### 9. 健康检查
 ```
 GET /api/health                           # 返回状态、版本、当前模型名
 ```
@@ -379,8 +476,8 @@ GET /api/health                           # 返回状态、版本、当前模型
 │  • 会话列表   │  - 思考链 (可折叠)          │ Editor    │
 │  • 记忆      │  - 工具调用中文化            │           │
 │  • 技能      │  - Markdown 渲染            │           │
-│              │  - 代码高亮                  │           │
-│              │                              │           │
+│  • MCP       │  - 代码高亮                  │           │
+│  • 缓存      │                              │           │
 └──────────────┴──────────────────────────────┴───────────┘
 ```
 
@@ -399,10 +496,13 @@ frontend/src/
 │   └── globals.css             # 主题色、组件样式、工具调用样式
 ├── components/
 │   ├── chat/                   # ChatPanel（消息流 + 工具调用可视化）
-│   ├── sidebar/                # Sidebar（导航 + 会话/记忆/技能列表）
-│   │   └── MemoryPanel.tsx     # 记忆面板（三 Tab：记忆/日记/人格）
+│   ├── sidebar/                # Sidebar（导航 + 会话/记忆/技能/MCP/缓存列表）
+│   │   ├── MemoryPanel.tsx     # 记忆面板（三 Tab：记忆/日记/人格）
+│   │   ├── McpPanel.tsx        # MCP 管理面板（Server 列表/状态/工具/操作）
+│   │   ├── McpServerDialog.tsx # MCP Server 添加/编辑弹窗
+│   │   └── CachePanel.tsx      # 缓存管理面板（accordion 展开模式）
 │   ├── editor/                 # InspectorPanel（Monaco Editor）
-│   ├── settings/               # SettingsDialog（模型配置弹窗，含记忆设置 Tab）
+│   ├── settings/               # SettingsDialog（通用/模型/记忆/缓存 四 Tab）
 │   └── ui/                     # Shadcn/UI 基础组件
 └── lib/
     └── api.ts                  # API 客户端（Chat/Sessions/Files/Settings/Memory...）
@@ -419,13 +519,16 @@ frontend/src/
 - 右：后端状态指示 → LLM/Embedding 模型参数设置 ⚙️ → Inspector 切换 📄
 
 **工具调用展示（中间栏）：**
-- 工具名映射为中文 + Emoji（如 `read_file` → 📄 读取文件）
+- Core Tools 名映射为中文 + Emoji（如 `read_file` → 📄 读取文件）
+- MCP 工具动态显示为 🔌 MCP: {tool_name} 格式
 - Input/Output 使用 Markdown 渲染（代码块语法高亮、标题、列表等）
 - 代码块样式：浅灰背景 (`#f6f8fb`) + 蓝色左边条 + Prism 高亮 + JetBrains Mono 字体
 
-**设置弹窗：**
-- 分「LLM 模型」和「Embedding 模型」两组
-- 支持配置：API Key（密码模式可切换显示）、Base URL、模型名、Temperature、Max Tokens
+**设置弹窗（四 Tab）：**
+- **通用**：主题切换（明亮/暗黑模式）
+- **模型**：LLM / Embedding / 翻译 三个子 Tab，配置 API Key、Base URL、模型名等
+- **记忆**：自动提取、语义索引、日志天数、Token 预算
+- **缓存**：URL / LLM / Prompt / 翻译 / MCP 工具缓存的开关控制
 - 保存后自动关闭，配置写入后端 `.env`
 
 ### 重要技术选择
@@ -440,6 +543,7 @@ frontend/src/
 | remark-gfm | GitHub Flavored Markdown | 最新 |
 | react-syntax-highlighter | 代码高亮 | Prism + oneLight 主题 |
 | Lucide Icons | 图标库 | 最新 |
+| mcp (Python) | MCP Client SDK | >=1.0.0 |
 
 ---
 
@@ -478,6 +582,12 @@ E:\code\opensre/
 │   │   ├── rag_tool.py
 │   │   ├── memory_write_tool.py    # 记忆写入工具
 │   │   └── memory_search_tool.py   # 记忆搜索工具
+│   ├── mcp_module/             # MCP (Model Context Protocol) 模块
+│   │   ├── __init__.py         # MCPManager 单例导出
+│   │   ├── config.py           # mcp_servers.json 配置读写
+│   │   ├── manager.py          # MCPManager 核心（连接管理、工具发现）
+│   │   └── tool_wrapper.py     # MCP 工具 → LangChain StructuredTool（含缓存）
+│   ├── mcp_servers.json        # MCP Server 配置文件
 │   ├── graph/                  # LangGraph Agent
 │   │   └── agent.py            # create_agent 配置
 │   ├── cache/                  # 缓存系统模块
@@ -493,7 +603,8 @@ E:\code\opensre/
 │   │   ├── url/                # URL 缓存文件
 │   │   ├── llm/                # LLM 缓存文件
 │   │   ├── prompt/             # Prompt 缓存文件
-│   │   └── translate/          # 翻译缓存文件
+│   │   ├── translate/          # 翻译缓存文件
+│   │   └── tool_mcp_*/         # MCP 工具缓存文件（按工具名自动创建）
 │   ├── knowledge/              # RAG 知识库文档（PDF/MD/TXT）
 │   └── storage/                # 索引持久化存储
 │
@@ -506,7 +617,10 @@ E:\code\opensre/
 │   │   ├── components/
 │   │   │   ├── chat/
 │   │   │   ├── sidebar/
-│   │   │   │   └── MemoryPanel.tsx  # 记忆面板（三 Tab）
+│   │   │   │   ├── MemoryPanel.tsx  # 记忆面板（三 Tab）
+│   │   │   │   ├── McpPanel.tsx     # MCP 管理面板
+│   │   │   │   ├── McpServerDialog.tsx # MCP Server 添加/编辑弹窗
+│   │   │   │   └── CachePanel.tsx   # 缓存管理面板
 │   │   │   ├── editor/
 │   │   │   ├── settings/
 │   │   │   └── ui/
@@ -551,6 +665,17 @@ E:\code\opensre/
    - `EMBEDDING_API_KEY`、`EMBEDDING_API_BASE`、`EMBEDDING_MODEL`
 3. 修改后需重启后端生效
 
+### 配置 MCP
+1. 编辑 `backend/mcp_servers.json` 添加 MCP Server（或通过前端 MCP 面板操作）
+2. 支持两种传输方式：
+   - **stdio**：`command` + `args` + `env`（本地进程，如 `npx -y @modelcontextprotocol/server-filesystem /tmp`）
+   - **sse**：`url` + `headers`（远程 HTTP）
+3. 设置 `enabled: true/false` 控制是否自动连接
+4. 环境变量：
+   - `MCP_ENABLED`（默认 true，MCP 模块总开关）
+   - `MCP_TOOL_CACHE_TTL`（默认 3600，MCP 工具缓存 TTL 秒数）
+5. 也可通过前端设置弹窗的"缓存" Tab 控制 MCP 开关
+
 ### 配置记忆系统
 1. 编辑 `backend/.env` 文件
 2. 支持的环境变量：
@@ -578,6 +703,13 @@ E:\code\opensre/
 - 前端 Chat 面板实时展示工具调用
 - 可折叠展开详细的 Input/Output
 - 完全可视化 Agent 的推理链
+
+**调试 MCP 连接：**
+- 查看所有 Server 状态：`GET /api/mcp/servers`
+- 查看已发现的工具：`GET /api/mcp/tools`
+- 检查后端日志中 `MCP server '{name}' connected` 确认连接成功
+- MCP 工具在 ChatPanel 中显示为 🔌 MCP: {tool_name}
+- 模块目录为 `mcp_module/`（非 `mcp/`），避免与 pip 包冲突
 
 **管理缓存系统：**
 - 查看缓存统计：`GET /api/cache/stats`
@@ -614,3 +746,5 @@ E:\code\opensre/
 - **LlamaIndex 文档：** https://docs.llamaindex.ai/
 - **Next.js 文档：** https://nextjs.org/docs
 - **FastAPI 文档：** https://fastapi.tiangolo.com/
+- **MCP 规范：** https://modelcontextprotocol.io/
+- **MCP Python SDK：** https://github.com/modelcontextprotocol/python-sdk
