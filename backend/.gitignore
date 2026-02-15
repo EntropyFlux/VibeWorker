@@ -45,6 +45,9 @@ Thumbs.db
 *.log
 logs/
 
+# Sessions
+sessions/*.json
+
 # Temporary files
 *.tmp
 *.temp
