@@ -237,6 +237,11 @@ export interface SettingsData {
   translate_api_key: string;
   translate_api_base: string;
   translate_model: string;
+  // Memory configuration
+  memory_auto_extract: boolean;
+  memory_daily_log_days: number;
+  memory_max_prompt_tokens: number;
+  memory_index_enabled: boolean;
 }
 
 export async function fetchSettings(): Promise<SettingsData> {
@@ -369,6 +374,113 @@ export async function fetchStoreCategories(): Promise<string[]> {
   }
   const data = await res.json();
   return data.categories || [];
+}
+
+// ============================================
+// Memory API
+// ============================================
+export interface MemoryEntry {
+  entry_id: string;
+  content: string;
+  category: string;
+  timestamp: string;
+}
+
+export interface DailyLog {
+  date: string;
+  path: string;
+  size: number;
+}
+
+export interface MemoryStats {
+  total_entries: number;
+  category_counts: Record<string, number>;
+  daily_logs_count: number;
+  memory_file_size: number;
+  daily_log_days: number;
+  auto_extract_enabled: boolean;
+}
+
+export async function fetchMemoryEntries(
+  category?: string,
+  page: number = 1,
+  pageSize: number = 50
+): Promise<{ entries: MemoryEntry[]; total: number }> {
+  const params = new URLSearchParams({ page: page.toString(), page_size: pageSize.toString() });
+  if (category) params.set("category", category);
+  const res = await fetch(`${API_BASE}/api/memory/entries?${params}`);
+  if (!res.ok) throw new Error("Failed to fetch memory entries");
+  return await res.json();
+}
+
+export async function addMemoryEntry(
+  content: string,
+  category: string = "general"
+): Promise<MemoryEntry> {
+  const res = await fetch(`${API_BASE}/api/memory/entries`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content, category }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to add memory entry");
+  }
+  const data = await res.json();
+  return data.entry;
+}
+
+export async function deleteMemoryEntry(entryId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/memory/entries/${entryId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to delete memory entry");
+  }
+}
+
+export async function fetchDailyLogs(): Promise<DailyLog[]> {
+  const res = await fetch(`${API_BASE}/api/memory/daily-logs`);
+  if (!res.ok) throw new Error("Failed to fetch daily logs");
+  const data = await res.json();
+  return data.logs || [];
+}
+
+export async function fetchDailyLogContent(date: string): Promise<string> {
+  const res = await fetch(`${API_BASE}/api/memory/daily-logs/${date}`);
+  if (!res.ok) throw new Error(`No log found for ${date}`);
+  const data = await res.json();
+  return data.content;
+}
+
+export async function searchMemory(
+  query: string,
+  topK: number = 5
+): Promise<string> {
+  const res = await fetch(`${API_BASE}/api/memory/search`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, top_k: topK }),
+  });
+  if (!res.ok) throw new Error("Memory search failed");
+  const data = await res.json();
+  return data.result;
+}
+
+export async function fetchMemoryStats(): Promise<MemoryStats> {
+  const res = await fetch(`${API_BASE}/api/memory/stats`);
+  if (!res.ok) throw new Error("Failed to fetch memory stats");
+  return await res.json();
+}
+
+export async function reindexMemory(): Promise<string> {
+  const res = await fetch(`${API_BASE}/api/memory/reindex`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Failed to reindex memory");
+  const data = await res.json();
+  return data.message;
 }
 
 // ============================================

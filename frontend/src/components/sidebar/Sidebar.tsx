@@ -8,7 +8,6 @@ import {
     Database,
     Plus,
     Trash2,
-    ChevronRight,
     Store,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -22,6 +21,7 @@ import {
 import { fetchSessions, createSession, deleteSession, fetchSkills, deleteSkill, type Session, type Skill } from "@/lib/api";
 import SkillsStoreDialog from "@/components/store/SkillsStoreDialog";
 import CachePanel from "./CachePanel";
+import MemoryPanel from "./MemoryPanel";
 
 type ViewMode = "chat" | "memory" | "skills" | "cache";
 
@@ -167,7 +167,7 @@ export default function Sidebar({
                         {currentView === "chat"
                             ? "会话"
                             : currentView === "memory"
-                                ? "记忆文件"
+                                ? "记忆"
                                 : currentView === "skills"
                                     ? "技能"
                                     : "缓存"}
@@ -250,27 +250,9 @@ export default function Sidebar({
                             </>
                         )}
 
-                        {/* Memory Files */}
+                        {/* Memory Panel */}
                         {currentView === "memory" && (
-                            <div className="space-y-1">
-                                {[
-                                    { name: "MEMORY.md", path: "memory/MEMORY.md", icon: "📝" },
-                                    { name: "SOUL.md", path: "workspace/SOUL.md", icon: "💫" },
-                                    { name: "IDENTITY.md", path: "workspace/IDENTITY.md", icon: "🪪" },
-                                    { name: "USER.md", path: "workspace/USER.md", icon: "👤" },
-                                    { name: "AGENTS.md", path: "workspace/AGENTS.md", icon: "📋" },
-                                ].map((file) => (
-                                    <button
-                                        key={file.path}
-                                        className="w-full text-left px-3 py-2.5 rounded-xl text-sm hover:bg-accent transition-all duration-150 flex items-center gap-2 group"
-                                        onClick={() => onFileOpen?.(file.path)}
-                                    >
-                                        <span>{file.icon}</span>
-                                        <span className="flex-1">{file.name}</span>
-                                        <ChevronRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-40 transition-opacity" />
-                                    </button>
-                                ))}
-                            </div>
+                            <MemoryPanel onFileOpen={onFileOpen} />
                         )}
 
                         {/* Skills List */}

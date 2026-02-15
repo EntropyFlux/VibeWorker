@@ -20,6 +20,7 @@ from config import settings, PROJECT_ROOT
 from sessions_manager import session_manager
 from graph.agent import run_agent
 from tools.rag_tool import rebuild_index
+from memory_manager import memory_manager
 
 # Configure logging
 logging.basicConfig(
@@ -228,6 +229,15 @@ async def _stream_agent_response(message: str, history: list, session_id: str):
                         session_id, "assistant", full_response,
                         tool_calls=tool_calls_log if tool_calls_log else None,
                     )
+
+                # Auto-extract memories if enabled
+                if settings.memory_auto_extract:
+                    try:
+                        recent_messages = session_manager.get_session(session_id)[-6:]
+                        asyncio.create_task(memory_manager.auto_extract(recent_messages))
+                    except Exception as e:
+                        logger.warning(f"Auto-extract hook failed: {e}")
+
                 sse_data = json.dumps({"type": "done"}, ensure_ascii=False)
                 yield f"data: {sse_data}\n\n"
 
@@ -576,6 +586,117 @@ async def get_store_categories():
 
 
 # ============================================
+# API Routes: Memory Management
+# ============================================
+class MemoryEntryRequest(BaseModel):
+    content: str
+    category: str = "general"
+
+
+class MemorySearchRequest(BaseModel):
+    query: str
+    top_k: int = 5
+
+
+@app.get("/api/memory/entries")
+async def list_memory_entries(
+    category: Optional[str] = Query(None, description="Filter by category"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+):
+    """List MEMORY.md entries with optional category filter and pagination."""
+    try:
+        entries = memory_manager.get_entries(category=category)
+        total = len(entries)
+        start = (page - 1) * page_size
+        end = start + page_size
+        return {
+            "entries": entries[start:end],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+    except Exception as e:
+        logger.error(f"Failed to list memory entries: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/memory/entries")
+async def add_memory_entry(request: MemoryEntryRequest):
+    """Add a new memory entry to MEMORY.md."""
+    if not request.content.strip():
+        raise HTTPException(status_code=400, detail="Content cannot be empty")
+    try:
+        entry = memory_manager.add_entry(request.content, request.category)
+        return {"status": "ok", "entry": entry}
+    except Exception as e:
+        logger.error(f"Failed to add memory entry: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/memory/entries/{entry_id}")
+async def delete_memory_entry(entry_id: str):
+    """Delete a single memory entry by ID."""
+    success = memory_manager.delete_entry(entry_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    return {"status": "ok", "deleted": entry_id}
+
+
+@app.get("/api/memory/daily-logs")
+async def list_daily_logs():
+    """List all daily log files."""
+    logs = memory_manager.list_daily_logs()
+    return {"logs": logs}
+
+
+@app.get("/api/memory/daily-logs/{date}")
+async def get_daily_log(date: str):
+    """Get content of a specific daily log."""
+    content = memory_manager.read_daily_log(date)
+    if not content:
+        raise HTTPException(status_code=404, detail=f"No log found for {date}")
+    return {"date": date, "content": content}
+
+
+@app.post("/api/memory/search")
+async def search_memory(request: MemorySearchRequest):
+    """Search across all memory files."""
+    if not request.query.strip():
+        raise HTTPException(status_code=400, detail="Query cannot be empty")
+    try:
+        from tools.memory_search_tool import memory_search as ms_tool
+        result = ms_tool.invoke({"query": request.query, "top_k": request.top_k})
+        return {"query": request.query, "result": result}
+    except Exception as e:
+        logger.error(f"Memory search failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/memory/stats")
+async def get_memory_stats():
+    """Get memory statistics."""
+    try:
+        stats = memory_manager.get_stats()
+        return stats
+    except Exception as e:
+        logger.error(f"Failed to get memory stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/memory/reindex")
+async def reindex_memory():
+    """Force rebuild the memory search index."""
+    try:
+        from tools.memory_search_tool import rebuild_memory_index
+        result = rebuild_memory_index()
+        return {"status": "ok", "message": result}
+    except Exception as e:
+        logger.error(f"Failed to reindex memory: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
 # API Routes: Knowledge Base
 # ============================================
 @app.post("/api/knowledge/rebuild")
@@ -731,6 +852,11 @@ class SettingsUpdateRequest(BaseModel):
     translate_cache_ttl: Optional[int] = None
     cache_max_memory_items: Optional[int] = None
     cache_max_disk_size_mb: Optional[int] = None
+    # Memory configuration
+    memory_auto_extract: Optional[bool] = None
+    memory_daily_log_days: Optional[int] = None
+    memory_max_prompt_tokens: Optional[int] = None
+    memory_index_enabled: Optional[bool] = None
 
 
 def _read_env_file() -> dict:
@@ -804,6 +930,11 @@ async def get_settings():
         "translate_cache_ttl": int(env.get("TRANSLATE_CACHE_TTL", "604800")),
         "cache_max_memory_items": int(env.get("CACHE_MAX_MEMORY_ITEMS", "100")),
         "cache_max_disk_size_mb": int(env.get("CACHE_MAX_DISK_SIZE_MB", "5120")),
+        # Memory configuration
+        "memory_auto_extract": env.get("MEMORY_AUTO_EXTRACT", "false").lower() == "true",
+        "memory_daily_log_days": int(env.get("MEMORY_DAILY_LOG_DAYS", "2")),
+        "memory_max_prompt_tokens": int(env.get("MEMORY_MAX_PROMPT_TOKENS", "4000")),
+        "memory_index_enabled": env.get("MEMORY_INDEX_ENABLED", "true").lower() == "true",
     }
 
 
@@ -835,6 +966,11 @@ async def update_settings(request: SettingsUpdateRequest):
         "TRANSLATE_CACHE_TTL": str(request.translate_cache_ttl) if request.translate_cache_ttl is not None else None,
         "CACHE_MAX_MEMORY_ITEMS": str(request.cache_max_memory_items) if request.cache_max_memory_items is not None else None,
         "CACHE_MAX_DISK_SIZE_MB": str(request.cache_max_disk_size_mb) if request.cache_max_disk_size_mb is not None else None,
+        # Memory configuration
+        "MEMORY_AUTO_EXTRACT": str(request.memory_auto_extract).lower() if request.memory_auto_extract is not None else None,
+        "MEMORY_DAILY_LOG_DAYS": str(request.memory_daily_log_days) if request.memory_daily_log_days is not None else None,
+        "MEMORY_MAX_PROMPT_TOKENS": str(request.memory_max_prompt_tokens) if request.memory_max_prompt_tokens is not None else None,
+        "MEMORY_INDEX_ENABLED": str(request.memory_index_enabled).lower() if request.memory_index_enabled is not None else None,
     }
     for env_key, value in update_map.items():
         if value is not None:

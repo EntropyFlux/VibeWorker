@@ -58,6 +58,17 @@ class PromptCache:
             if memory_file.exists():
                 workspace_files.append(memory_file)
 
+            # Track daily log files for cache invalidation
+            from datetime import datetime, timedelta
+            logs_dir = settings.memory_dir / "logs"
+            if logs_dir.exists():
+                today = datetime.now()
+                for i in range(settings.memory_daily_log_days):
+                    day = (today - timedelta(days=i)).strftime("%Y-%m-%d")
+                    log_file = logs_dir / f"{day}.md"
+                    if log_file.exists():
+                        workspace_files.append(log_file)
+
             for file_path in workspace_files:
                 if file_path.exists():
                     files_version[str(file_path)] = file_path.stat().st_mtime

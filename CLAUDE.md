@@ -65,7 +65,7 @@ npm lint       # 运行 ESLint
 4. 迭代，直到完成或达到最大步数
 5. 通过 SSE 流式返回思考过程和最终回复
 
-### 2. Core Tools（5 个内置工具）
+### 2. Core Tools（7 个内置工具）
 
 所有 Core Tools 均使用 LangChain 原生实现，存放在 `backend/tools/`。
 
@@ -76,6 +76,8 @@ npm lint       # 运行 ESLint
 | **fetch_url** | 网页内容获取（Agent 联网核心） | `langchain_community.tools.RequestsGetTool` (需 Wrapper) | **必须包装**：原生返回 HTML 效率低，用 BeautifulSoup/html2text 清洗返回 Markdown 或纯文本 |
 | **read_file** | 读取本地文件内容（Skills 机制依赖） | `langchain_community.tools.file_management.ReadFileTool` | 必须设置 `root_dir` 为项目根目录，禁止读取系统外文件 |
 | **search_knowledge_base** | RAG 混合检索 | LlamaIndex (Hybrid: BM25 + Vector) | 扫描 `knowledge/` 构建索引，持久化存储在 `storage/` |
+| **memory_write** | 记忆写入（长期记忆或每日日志） | 自定义 `@tool`，调用 `MemoryManager` | 支持 `write_to="memory"/"daily"`，自动去重、分类管理 |
+| **memory_search** | 记忆搜索（语义+关键词） | 自定义 `@tool` + LlamaIndex | 优先语义搜索，降级为关键词匹配；索引持久化到 `storage/memory_index/` |
 
 ### 3. 缓存系统 (Cache System)
 
@@ -221,7 +223,7 @@ description: 技能中文描述     # 一句话概括功能
 
 **文件位置：** `backend/workspace/`
 
-System Prompt 由以下 **6 部分**顺序拼接而成（按顺序）：
+System Prompt 由以下部分顺序拼接而成（按顺序）：
 
 ```
 1. SKILLS_SNAPSHOT.xml    ← 能力列表（自动生成）
@@ -230,34 +232,35 @@ System Prompt 由以下 **6 部分**顺序拼接而成（按顺序）：
 4. USER.md                ← 用户画像
 5. AGENTS.md              ← 行为准则 & 记忆操作指南（最关键）
 6. MEMORY.md              ← 长期记忆
+7. Daily Logs             ← 今天+昨天的每日日志（自动加载）
 ```
 
 **截断策略：**
 - 若拼接后超出模型 Token 限制（或单文件超 20k 字符），截断并在末尾添加 `...[truncated]`
+- 记忆部分有独立 Token 预算（`MEMORY_MAX_PROMPT_TOKENS`，默认 4000），优先级：MEMORY.md > 今天 > 昨天
 - 由 `prompt_builder.py` 负责拼接逻辑
 
 **AGENTS.md 的必要内容：**
-必须包含明确的元指令，告诉 Agent **如何使用 Skills**：
+必须包含明确的元指令，告诉 Agent **如何使用 Skills 和记忆系统**：
 
 ```markdown
 # 操作指南
 
 ## 技能调用协议 (SKILL PROTOCOL)
-你拥有一个技能列表 (SKILLS_SNAPSHOT)，其中列出了你可以使用的能力及其定义文件的位置。
-**当你要使用某个技能时，必须严格遵守以下步骤：**
-1. 你的第一步行动永远是使用 `read_file` 工具读取该技能对应的 `location` 路径下的 Markdown 文件。
-2. 仔细阅读文件中的内容、步骤和示例。
-3. 根据文件中的指示，结合你内置的 Core Tools (terminal, python_repl, fetch_url) 来执行具体任务。
-**禁止**直接猜测技能的参数或用法，必须先读取文件！
+（省略，详见 backend/workspace/AGENTS.md）
 
 ## 技能创建协议 (SKILL CREATION PROTOCOL)
-当用户要求你创建新技能时，必须遵守以下格式规范：
-1. 在 `skills/` 目录下创建以技能名命名的文件夹（英文、小写、下划线分隔）。
-2. 在该文件夹内创建 `SKILL.md` 文件，必须以 YAML Frontmatter 开头。
-3. **禁止省略 Frontmatter**！
+（省略，详见 backend/workspace/AGENTS.md）
 
-## 记忆协议
-...
+## 记忆协议 (MEMORY PROTOCOL)
+- 声明 `memory_write` 和 `memory_search` 两个专用工具
+- 说明长期记忆（MEMORY.md）vs 每日日志（Daily Logs）的使用场景
+- **必须**使用 `memory_write` 写入记忆，**禁止** `terminal echo >>`
+- **必须**使用 `memory_search` 搜索历史记忆
+- 分类说明：preferences/facts/tasks/reflections/general
+
+## 对话协议 (CHAT PROTOCOL)
+（省略，详见 backend/workspace/AGENTS.md）
 ```
 
 ### 5. 会话管理
@@ -285,6 +288,7 @@ System Prompt 由以下 **6 部分**顺序拼接而成（按顺序）：
 - `llm_max_tokens`：最大输出（默认 4096）
 - `embedding_api_key`、`embedding_api_base`、`embedding_model`：向量模型配置
 - 目录路径：`memory_dir`, `sessions_dir`, `skills_dir`, `workspace_dir`, `knowledge_dir`, `storage_dir`
+- 记忆配置：`memory_auto_extract`(自动提取), `memory_daily_log_days`(日志天数), `memory_max_prompt_tokens`(Token预算), `memory_index_enabled`(索引开关)
 
 **环境变量优先级：**
 - 优先读取 `.env` 文件中的 `LLM_API_KEY` 等
@@ -334,13 +338,25 @@ DELETE /api/skills/{skill_name}           # 删除技能（删除整个技能文
 POST /api/knowledge/rebuild               # 强制重建 RAG 索引
 ```
 
-### 6. 设置管理接口
+### 6. 记忆管理接口
 ```
-GET /api/settings                         # 获取配置（从 .env 读取）
+GET  /api/memory/entries                  # 列出 MEMORY.md 条目（支持分类筛选、分页）
+POST /api/memory/entries                  # 添加记忆条目 {content, category}
+DELETE /api/memory/entries/{entry_id}     # 删除单条记忆
+GET  /api/memory/daily-logs              # 列出所有 Daily Log 文件
+GET  /api/memory/daily-logs/{date}       # 获取指定日期的日志内容
+POST /api/memory/search                  # 搜索记忆 {query, top_k}
+GET  /api/memory/stats                   # 记忆统计信息
+POST /api/memory/reindex                 # 强制重建记忆索引
+```
+
+### 7. 设置管理接口
+```
+GET /api/settings                         # 获取配置（从 .env 读取，含记忆配置）
 PUT /api/settings                         # 更新配置（写入 .env，需重启后端生效）
 ```
 
-### 7. 健康检查
+### 8. 健康检查
 ```
 GET /api/health                           # 返回状态、版本、当前模型名
 ```
@@ -384,11 +400,12 @@ frontend/src/
 ├── components/
 │   ├── chat/                   # ChatPanel（消息流 + 工具调用可视化）
 │   ├── sidebar/                # Sidebar（导航 + 会话/记忆/技能列表）
+│   │   └── MemoryPanel.tsx     # 记忆面板（三 Tab：条目/日志/文件）
 │   ├── editor/                 # InspectorPanel（Monaco Editor）
-│   ├── settings/               # SettingsDialog（模型配置弹窗）
+│   ├── settings/               # SettingsDialog（模型配置弹窗，含记忆设置 Tab）
 │   └── ui/                     # Shadcn/UI 基础组件
 └── lib/
-    └── api.ts                  # API 客户端（Chat/Sessions/Files/Settings...）
+    └── api.ts                  # API 客户端（Chat/Sessions/Files/Settings/Memory...）
 ```
 
 ### UI/UX 规范
@@ -437,9 +454,10 @@ E:\code\opensre/
 │   ├── sessions_manager.py     # 会话管理器
 │   ├── .env                    # 环境变量（API Key 等）
 │   ├── requirements.txt        # Python 依赖
+│   ├── memory_manager.py        # 记忆管理中心（MemoryManager 核心类）
 │   ├── memory/
-│   │   ├── logs/               # 日志存储
-│   │   └── MEMORY.md           # 核心记忆文件
+│   │   ├── logs/               # Daily Logs（每日日志，YYYY-MM-DD.md）
+│   │   └── MEMORY.md           # 长期记忆（按分类组织的结构化条目）
 │   ├── sessions/               # JSON 会话记录
 │   ├── skills/                 # Agent Skills（用户自定义）
 │   │   ├── get_weather/
@@ -451,13 +469,15 @@ E:\code\opensre/
 │   │   ├── SOUL.md             # 核心设定
 │   │   ├── IDENTITY.md         # 自我认知
 │   │   └── USER.md             # 用户画像
-│   ├── tools/                  # Core Tools 实现
+│   ├── tools/                  # Core Tools 实现（7 个内置工具）
 │   │   ├── __init__.py         # get_all_tools()
 │   │   ├── terminal_tool.py
 │   │   ├── python_repl_tool.py
 │   │   ├── fetch_url_tool.py
 │   │   ├── read_file_tool.py
-│   │   └── rag_tool.py
+│   │   ├── rag_tool.py
+│   │   ├── memory_write_tool.py    # 记忆写入工具
+│   │   └── memory_search_tool.py   # 记忆搜索工具
 │   ├── graph/                  # LangGraph Agent
 │   │   └── agent.py            # create_agent 配置
 │   ├── cache/                  # 缓存系统模块
@@ -486,6 +506,7 @@ E:\code\opensre/
 │   │   ├── components/
 │   │   │   ├── chat/
 │   │   │   ├── sidebar/
+│   │   │   │   └── MemoryPanel.tsx  # 记忆面板（三 Tab）
 │   │   │   ├── editor/
 │   │   │   ├── settings/
 │   │   │   └── ui/
@@ -529,6 +550,15 @@ E:\code\opensre/
    - `LLM_MAX_TOKENS`（默认 4096）
    - `EMBEDDING_API_KEY`、`EMBEDDING_API_BASE`、`EMBEDDING_MODEL`
 3. 修改后需重启后端生效
+
+### 配置记忆系统
+1. 编辑 `backend/.env` 文件
+2. 支持的环境变量：
+   - `MEMORY_AUTO_EXTRACT`（默认 false，自动提取记忆）
+   - `MEMORY_DAILY_LOG_DAYS`（默认 2，加载几天日志到 Prompt）
+   - `MEMORY_MAX_PROMPT_TOKENS`（默认 4000，记忆 Token 预算）
+   - `MEMORY_INDEX_ENABLED`（默认 true，语义搜索索引开关）
+3. 也可通过前端设置弹窗的"记忆"Tab 修改
 
 ### 调试技巧
 

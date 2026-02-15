@@ -73,6 +73,12 @@ class Settings(BaseSettings):
     cache_max_memory_items: int = Field(default=100)
     cache_max_disk_size_mb: int = Field(default=5120)  # 5GB
 
+    # Memory Configuration
+    memory_auto_extract: bool = Field(default=False)
+    memory_daily_log_days: int = Field(default=2)
+    memory_max_prompt_tokens: int = Field(default=4000)
+    memory_index_enabled: bool = Field(default=True)
+
     # Claude Code Skills compatibility
     claude_code_skills_dir: Optional[Path] = None
 

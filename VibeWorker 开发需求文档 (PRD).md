@@ -27,7 +27,7 @@
     - 显著提升响应速度（10-100x）并节省 API 成本
 
 ## 二、内置工具
-VibeWorker 在启动时，除了加载用户自定义的 Skills 外，必须内置以下 5 个核心基础工具（Core Tools）。根据“优先使用 LangChain 原生工具”的原则，技术选型更新如下：
+VibeWorker 在启动时，除了加载用户自定义的 Skills 外，必须内置以下 7 个核心基础工具（Core Tools）。根据"优先使用 LangChain 原生工具"的原则，技术选型更新如下：
 
 ### 1. 命令行操作工具 (Command Line Interface)
 + **功能描述**：允许 Agent 在受限的安全环境下执行 Shell 命令。
@@ -72,6 +72,26 @@ VibeWorker 在启动时，除了加载用户自定义的 Skills 外，必须内�
     - **混合检索**：必须实现 **Hybrid Search**（关键词检索 BM25 + 向量检索 Vector Search）。
     - **持久化**：索引文件需持久化存储在本地（`storage/`）。
 + **工具名称**：`search_knowledge_base`。
+
+### 6. 记忆写入工具 (Memory Write) ✅ 已实现
++ **功能描述**：Agent 专用记忆写入工具，替代原有的 `terminal echo >>` 方式，提供格式校验、自动去重和分类管理。
++ **实现逻辑**：
+    - 自定义 LangChain `@tool` 实现，调用 `MemoryManager` 核心类。
+    - **写入模式**：
+        * `write_to="memory"` → 写入 `MEMORY.md` 对应分类章节（preferences/facts/tasks/reflections/general）
+        * `write_to="daily"` → 追加到今天的 Daily Log（`memory/logs/YYYY-MM-DD.md`）
+    - **自动去重**：相同内容不会重复写入。
+    - **格式规范**：条目自动添加日期和唯一 ID（`- [YYYY-MM-DD][id] 内容`）。
++ **工具名称**：`memory_write`。
+
+### 7. 记忆搜索工具 (Memory Search) ✅ 已实现
++ **功能描述**：跨所有记忆文件（MEMORY.md + Daily Logs）进行语义搜索或关键词搜索。
++ **实现逻辑**：
+    - **优先使用** LlamaIndex VectorStoreIndex 进行语义搜索（复用现有 Embedding 配置）。
+    - **降级方案**：当向量索引不可用时（Embedding 未配置、依赖缺失），自动降级为纯 Python 关键词匹配搜索。
+    - **索引持久化**：向量索引存储在 `storage/memory_index/`，重启可复用。
+    - **索引重建**：通过 `POST /api/memory/reindex` 或 `rebuild_memory_index()` 强制重建。
++ **工具名称**：`memory_search`。
 
 ## 三、智能缓存系统 ✅ 已实现
 ### 1. 缓存系统概述
@@ -281,51 +301,85 @@ scripts\skills.bat install <name>
 
 ## 五、VibeWorker 对话记忆管理系统设计
 ### 1. 本地优先原则
-所有记忆文件（Markdown/JSON）均存储在本地文件系统，确保完全的数据主权和可解释性。
+所有记忆文件（Markdown/JSON）均存储在本地文件系统，确保完全的数据主权和可解释性。不使用任何外部数据库（无 SQLite/Redis/向量数据库），搜索索引仅为派生层，可从源文件重建。
 
-### 2. 系统提示词 (System Prompt) 构成
-System Prompt 由以下 6 部分动态拼接而成（按顺序）：
+### 2. 记忆架构 ✅ 已实现
+
+参考 OpenClaw 架构，VibeWorker 采用双层记忆系统：
+
+#### 2.1 长期记忆 (MEMORY.md)
++ **路径**：`backend/memory/MEMORY.md`
++ **性质**：跨会话持久信息，按分类组织
++ **分类**：
+    - `preferences`（用户偏好）：用户习惯、喜好、工作方式
+    - `facts`（重要事实）：项目信息、环境配置、关键事实
+    - `tasks`（任务备忘）：待办事项、提醒、截止日期
+    - `reflections`（反思日志）：经验教训、改进建议
+    - `general`（通用记忆）：其他值得记住的信息
++ **条目格式**：`- [YYYY-MM-DD][entry_id] 内容描述`
++ **写入方式**：Agent 通过 `memory_write` 工具写入，**禁止** `terminal echo >>` 方式
+
+#### 2.2 每日日志 (Daily Logs)
++ **路径**：`backend/memory/logs/YYYY-MM-DD.md`
++ **性质**：短期情景记忆，按天自动分文件
++ **用途**：任务执行摘要、临时事项、日程计划、对话中发现的重要信息
++ **条目格式**：`- [HH:MM] 内容描述`
++ **System Prompt 注入**：自动加载今天+昨天的日志（可配置天数）
+
+#### 2.3 记忆搜索
++ **语义搜索**：基于 LlamaIndex VectorStoreIndex（复用现有 Embedding 配置），索引持久化到 `storage/memory_index/`
++ **降级方案**：无 Embedding 配置时，自动降级为关键词匹配搜索
++ **搜索范围**：MEMORY.md + 所有 Daily Logs
+
+#### 2.4 自动记忆提取（可选，默认关闭）
++ **触发时机**：每次对话结束后（SSE `done` 事件后）
++ **工作原理**：取最近 3 轮对话，用 LLM 提取偏好/事实/任务，写入当天 Daily Log 并标记 `[auto]` 前缀
++ **配置**：`MEMORY_AUTO_EXTRACT=false`（默认关闭，避免额外 LLM 成本）
+
+#### 2.5 记忆管理器 (MemoryManager)
+核心类 `backend/memory_manager.py`，提供以下能力：
++ MEMORY.md 结构化解析、条目增删、去重
++ Daily Log 追加写入、读取、列表
++ 记忆统计信息
++ 自动提取 Hook
+
+### 3. 系统提示词 (System Prompt) 构成
+System Prompt 由以下部分动态拼接而成（按顺序）：
 
 1. `SKILLS_SNAPSHOT.md` (能力列表)
 2. `SOUL.md` (核心设定)
 3. `IDENTITY.md` (自我认知)
 4. `USER.md` (用户画像)
 5. `AGENTS.md` (行为准则 & **记忆操作指南**)
-6. `MEMORY.md` (长期记忆)
+6. `MEMORY.md` (长期记忆) + **Daily Logs (今天+昨天日志)**
 
-**截断策略**：如果拼接后 Token 超出模型限制（或单文件超 20k 字符），需对超长部分进行截断并在末尾添加 `...[truncated]` 标识。
+**截断策略**：
++ 单文件超 20k 字符时截断并添加 `...[truncated]`
++ 记忆部分有独立的 Token 预算（`MEMORY_MAX_PROMPT_TOKENS`，默认 4000 tokens），优先级：MEMORY.md > 今天日志 > 昨天日志，超出预算时从最旧内容开始截断
 
-### 3. AGENTS.md 的默认配置 (核心修正)
-由于 Agent 默认并不知道它是通过“阅读文件”来学习技能的，因此必须在初始化时生成一个包含明确指令的 `AGENTS.md`。
+### 4. AGENTS.md 的默认配置 (核心修正)
+由于 Agent 默认并不知道它是通过"阅读文件"来学习技能的，因此必须在初始化时生成一个包含明确指令的 `AGENTS.md`。
 
 + **必须包含的元指令 (Meta-Instructions)**：
+    - 技能调用协议（SKILL PROTOCOL）
+    - 技能创建协议（SKILL CREATION PROTOCOL）
+    - **记忆协议（MEMORY PROTOCOL）**：
+        * 声明 `memory_write` 和 `memory_search` 两个专用工具
+        * 说明长期记忆 vs 每日日志的使用场景
+        * **必须**使用 `memory_write` 写入记忆，**禁止** `terminal echo >>`
+        * **必须**使用 `memory_search` 搜索历史记忆
+    - 对话协议（CHAT PROTOCOL）
 
-```plain
-# 操作指南
+### 5. 记忆配置项 ✅ 已实现
 
-## 技能调用协议 (SKILL PROTOCOL)
-你拥有一个技能列表 (SKILLS_SNAPSHOT)，其中列出了你可以使用的能力及其定义文件的位置。
-**当你要使用某个技能时，必须严格遵守以下步骤：**
-1. 你的第一步行动永远是使用 `read_file` 工具读取该技能对应的 `location` 路径下的 Markdown 文件。
-2. 仔细阅读文件中的内容、步骤和示例。
-3. 根据文件中的指示，结合你内置的 Core Tools (terminal, python_repl, fetch_url) 来执行具体任务。
-**禁止**直接猜测技能的参数或用法，必须先读取文件！
-
-## 技能创建协议 (SKILL CREATION PROTOCOL)
-当用户要求创建新技能时，必须遵守以下格式规范：
-1. 在 skills/ 目录下创建以技能名命名的文件夹（英文、小写、下划线分隔）。
-2. 在该文件夹内创建 SKILL.md 文件，必须以 YAML Frontmatter 开头：
-   ---
-   name: skill_name
-   description: 技能的中文描述
-   ---
-3. 禁止省略 Frontmatter，否则系统无法正确识别技能。
-
-## 记忆协议
-...
+```bash
+MEMORY_AUTO_EXTRACT=false       # 自动提取记忆（默认关闭）
+MEMORY_DAILY_LOG_DAYS=2         # System Prompt 中加载最近几天的日志
+MEMORY_MAX_PROMPT_TOKENS=4000   # 记忆在 Prompt 中的 Token 上限
+MEMORY_INDEX_ENABLED=true       # 记忆语义搜索索引开关
 ```
 
-### 4. 会话存储 (Sessions)
+### 6. 会话存储 (Sessions)
 + **路径**：`backend/sessions/{session_name}.json`
 + **格式**：标准 JSON 数组，包含 `user`, `assistant`, `tool` (function calls) 类型的完整消息记录。
 
@@ -396,7 +450,26 @@ System Prompt 由以下 6 部分动态拼接而成（按顺序）：
     - 返回：`{ "status": "ok", "translated": "...", "source_language": "en", "target_language": "zh-CN" }`
     - 说明：使用 LLM 进行智能翻译，仅翻译描述性文本，保留代码块和技术标识符。
 
-### 10. 缓存管理接口 ✅ 已实现
+### 10. 记忆管理接口 ✅ 已实现
++ **Endpoint**: `GET /api/memory/entries` - 列出 MEMORY.md 条目。
+    - Query 参数：`category`（分类筛选，可选）、`page`（页码）、`page_size`（每页数量）
+    - 返回：条目列表（含 entry_id, content, category, timestamp）、总数、分页信息
++ **Endpoint**: `POST /api/memory/entries` - 添加记忆条目。
+    - Body: `{ "content": "...", "category": "preferences" }`
+    - 返回：创建的条目详情（含自动生成的 entry_id）
++ **Endpoint**: `DELETE /api/memory/entries/{entry_id}` - 删除单条记忆。
++ **Endpoint**: `GET /api/memory/daily-logs` - 列出所有 Daily Log 文件。
+    - 返回：日志列表（含 date, path, size），按日期倒序
++ **Endpoint**: `GET /api/memory/daily-logs/{date}` - 获取指定日期的日志内容。
+    - 返回：`{ "date": "2026-02-15", "content": "..." }`
++ **Endpoint**: `POST /api/memory/search` - 搜索记忆。
+    - Body: `{ "query": "...", "top_k": 5 }`
+    - 返回：搜索结果（语义搜索优先，降级为关键词匹配）
++ **Endpoint**: `GET /api/memory/stats` - 记忆统计信息。
+    - 返回：总条目数、各分类计数、日志文件数、配置状态
++ **Endpoint**: `POST /api/memory/reindex` - 强制重建记忆搜索索引。
+
+### 11. 缓存管理接口 ✅ 已实现
 + **Endpoint**: `GET /api/cache/stats` - 获取缓存统计信息。
     - 返回：各类缓存的命中率、未命中数、占用大小等统计数据
     - 包含：URL 缓存、LLM 缓存、Prompt 缓存、翻译缓存的详细统计
@@ -411,10 +484,14 @@ System Prompt 由以下 6 部分动态拼接而成（按顺序）：
 ### 1. 设计理念与布局架构
 前端采用 **IDE（集成开发环境）风格**，**可拖拽调整宽度的三栏式布局**。
 
-+ **左侧 (Sidebar)**：导航 (Chat/Memory/Skills) + 会话列表。
++ **左侧 (Sidebar)**：导航 (Chat/Memory/Skills/Cache) + 会话列表。
     - 宽度范围：200px ~ 400px（默认 256px），可拖拽调整。
     - 会话标题：最多显示两行，超出截断；无消息的新会话显示「新会话」。
     - 技能列表：每项右侧显示删除按钮（hover 可见），点击弹出确认后删除。
+    - **记忆面板 ✅ 已实现**：三 Tab 设计
+        * **条目 Tab**：分类筛选（全部/偏好/事实/任务/反思/通用）+ 搜索 + 添加/删除条目
+        * **日志 Tab**：按日期倒序列出 Daily Log 文件，点击在 Inspector 中打开
+        * **文件 Tab**：保留原有 5 个 workspace 文件快捷入口（MEMORY.md/SOUL.md/IDENTITY.md/USER.md/AGENTS.md）
 + **中间 (Stage)**：对话流 + **思考链可视化** (Collapsible Thoughts)。
     - 宽度自适应填充剩余空间。
     - **工具调用友好化展示**：
@@ -445,8 +522,9 @@ System Prompt 由以下 6 部分动态拼接而成（按顺序）：
     - 左侧：**"VibeWorker"** + 版本号
     - 右侧：后端状态指示器（在线/离线）+ ⚙️ 设置按钮（弹窗配置 LLM/Embedding 模型参数）+ Inspector 开关按钮
 + **设置弹窗 (Settings Dialog)**：
-    - 点击导航栏设置按钮打开，分「LLM 模型」和「Embedding 模型」两个分组。
+    - 点击导航栏设置按钮打开，分「主模型」「Embedding」「翻译」「记忆」四个 Tab。
     - 支持配置 API Key（密码模式，可切换显示）、API Base URL、模型名称、Temperature、Max Tokens。
+    - **记忆 Tab ✅ 已实现**：配置自动提取开关、语义搜索索引开关、日志加载天数、记忆 Token 预算。
     - 保存后自动关闭弹窗，配置写入后端 `.env` 文件。
 + **代码块样式**：
     - 工具调用详情中的代码块采用浅色背景（`#f6f8fb`）+ 蓝色左边条 + Prism 语法高亮。
@@ -477,13 +555,17 @@ vibeworker/
 │   ├── store/              # 技能商店模块 ✅
 │   │   ├── __init__.py     # SkillsStore 核心逻辑 (skills.sh 集成)
 │   │   └── models.py       # Pydantic 模型 (RemoteSkill, SkillDetail 等)
+│   ├── memory_manager.py   # 记忆管理中心（MemoryManager 核心类）✅
 │   ├── memory/             # 记忆存储
-│   │   ├── logs/           # Daily logs
-│   │   └── MEMORY.md       # Core memory
+│   │   ├── logs/           # Daily Logs（每日日志，YYYY-MM-DD.md）
+│   │   └── MEMORY.md       # 长期记忆（按分类组织的结构化条目）
 │   ├── sessions/           # JSON 会话记录
 │   ├── skills/             # Agent Skills 文件夹 (本地已安装技能)
 │   ├── workspace/          # System Prompts (SOUL.md, AGENTS.md, etc.)
-│   ├── tools/              # Core Tools 实现
+│   ├── tools/              # Core Tools 实现（7 个内置工具）
+│   │   ├── memory_write_tool.py   # 记忆写入工具 ✅
+│   │   ├── memory_search_tool.py  # 记忆搜索工具 ✅
+│   │   └── ...             # terminal, python_repl, fetch_url, read_file, rag
 │   ├── graph/              # LangGraph Agent 编排
 │   │   └── agent.py        # create_agent 配置
 │   ├── knowledge/          # RAG 知识库文档存放
@@ -499,6 +581,7 @@ vibeworker/
 │   │   ├── components/
 │   │   │   ├── chat/       # ChatPanel (对话流 + 工具调用可视化)
 │   │   │   ├── sidebar/    # Sidebar (会话/记忆/技能导航 + 商店入口)
+│   │   │   ├── MemoryPanel.tsx    # 记忆面板（三 Tab：条目/日志/文件）✅
 │   │   │   ├── editor/     # InspectorPanel (Monaco Editor + 翻译功能)
 │   │   │   ├── store/      # 技能商店组件 ✅
 │   │   │   │   ├── SkillsStoreDialog.tsx  # 商店弹窗主组件

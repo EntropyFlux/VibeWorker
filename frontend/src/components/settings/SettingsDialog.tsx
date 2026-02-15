@@ -73,6 +73,10 @@ export default function SettingsDialog() {
         translate_api_key: "",
         translate_api_base: "",
         translate_model: "",
+        memory_auto_extract: false,
+        memory_daily_log_days: 2,
+        memory_max_prompt_tokens: 4000,
+        memory_index_enabled: true,
     });
 
     useEffect(() => {
@@ -97,7 +101,7 @@ export default function SettingsDialog() {
         }
     };
 
-    const updateField = (key: keyof SettingsData, value: string | number) => {
+    const updateField = (key: keyof SettingsData, value: string | number | boolean) => {
         setForm((prev) => ({ ...prev, [key]: value }));
     };
 
@@ -130,7 +134,7 @@ export default function SettingsDialog() {
                     </div>
                 ) : (
                     <Tabs defaultValue="llm" className="w-full">
-                        <TabsList className="grid w-full grid-cols-3 mb-4">
+                        <TabsList className="grid w-full grid-cols-4 mb-4">
                             <TabsTrigger value="llm" className="text-xs">
                                 <span className="w-1.5 h-1.5 rounded-full bg-blue-500 mr-1.5" />
                                 主模型
@@ -142,6 +146,10 @@ export default function SettingsDialog() {
                             <TabsTrigger value="translate" className="text-xs">
                                 <span className="w-1.5 h-1.5 rounded-full bg-orange-500 mr-1.5" />
                                 翻译
+                            </TabsTrigger>
+                            <TabsTrigger value="memory" className="text-xs">
+                                <span className="w-1.5 h-1.5 rounded-full bg-purple-500 mr-1.5" />
+                                记忆
                             </TabsTrigger>
                         </TabsList>
 
@@ -231,6 +239,60 @@ export default function SettingsDialog() {
                                 value={form.translate_model}
                                 onChange={(v) => updateField("translate_model", v)}
                                 placeholder="gpt-4o-mini"
+                            />
+                        </TabsContent>
+
+                        {/* Memory Tab */}
+                        <TabsContent value="memory" className="space-y-3 mt-0">
+                            <p className="text-xs text-muted-foreground mb-3">
+                                配置记忆系统行为，包括自动提取和日志注入
+                            </p>
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-muted-foreground">自动提取记忆</label>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => updateField("memory_auto_extract", !form.memory_auto_extract)}
+                                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${form.memory_auto_extract ? "bg-primary" : "bg-border"}`}
+                                    >
+                                        <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${form.memory_auto_extract ? "translate-x-4.5" : "translate-x-0.5"}`} />
+                                    </button>
+                                    <span className="text-xs text-muted-foreground">
+                                        {form.memory_auto_extract ? "开启" : "关闭"}
+                                        <span className="text-[10px] text-muted-foreground/50 ml-1">
+                                            (会产生额外 LLM 调用)
+                                        </span>
+                                    </span>
+                                </div>
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-muted-foreground">语义搜索索引</label>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => updateField("memory_index_enabled", !form.memory_index_enabled)}
+                                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${form.memory_index_enabled ? "bg-primary" : "bg-border"}`}
+                                    >
+                                        <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${form.memory_index_enabled ? "translate-x-4.5" : "translate-x-0.5"}`} />
+                                    </button>
+                                    <span className="text-xs text-muted-foreground">
+                                        {form.memory_index_enabled ? "开启" : "关闭（降级为关键词搜索）"}
+                                    </span>
+                                </div>
+                            </div>
+                            <SettingsField
+                                label="日志加载天数"
+                                value={String(form.memory_daily_log_days)}
+                                onChange={(v) => updateField("memory_daily_log_days", parseInt(v) || 2)}
+                                type="number"
+                                placeholder="2"
+                            />
+                            <SettingsField
+                                label="记忆 Token 预算"
+                                value={String(form.memory_max_prompt_tokens)}
+                                onChange={(v) => updateField("memory_max_prompt_tokens", parseInt(v) || 4000)}
+                                type="number"
+                                placeholder="4000"
                             />
                         </TabsContent>
                     </Tabs>

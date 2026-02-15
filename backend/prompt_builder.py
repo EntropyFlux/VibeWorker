@@ -136,10 +136,31 @@ def build_system_prompt() -> str:
     if agents:
         parts.append(f"<!-- AGENTS -->\n{agents}")
 
-    # 6. MEMORY.md
-    memory = _read_file_safe(settings.memory_dir / "MEMORY.md", max_chars)
-    if memory:
-        parts.append(f"<!-- MEMORY -->\n{memory}")
+    # 6. MEMORY.md + Daily Logs (with token budget)
+    memory_parts = []
+    memory_budget = settings.memory_max_prompt_tokens * 4  # ~4 chars per token estimate
+
+    # MEMORY.md has highest priority
+    memory_content = _read_file_safe(settings.memory_dir / "MEMORY.md", max_chars)
+    if memory_content:
+        memory_parts.append(f"<!-- MEMORY -->\n{memory_content}")
+
+    # Daily Logs (today + yesterday, truncated if over budget)
+    try:
+        from memory_manager import memory_manager
+        daily_context = memory_manager.get_daily_context()
+        if daily_context:
+            memory_parts.append(f"<!-- DAILY_LOGS -->\n{daily_context}")
+    except Exception as e:
+        logger.warning(f"Failed to load daily logs: {e}")
+
+    # Apply memory token budget: truncate from oldest content
+    memory_combined = "\n\n".join(memory_parts)
+    if len(memory_combined) > memory_budget:
+        memory_combined = memory_combined[:memory_budget] + "\n\n...[memory truncated]"
+
+    if memory_combined:
+        parts.append(memory_combined)
 
     full_prompt = "\n\n---\n\n".join(parts)
 
