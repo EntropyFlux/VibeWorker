@@ -1079,8 +1079,11 @@ class SettingsUpdateRequest(BaseModel):
     # MCP configuration
     mcp_enabled: Optional[bool] = None
     mcp_tool_cache_ttl: Optional[int] = None
-    # Plan configuration
-    plan_enabled: Optional[bool] = None
+    # Agent mode configuration
+    agent_mode: Optional[str] = None
+    plan_revision_enabled: Optional[bool] = None
+    plan_require_approval: Optional[bool] = None
+    plan_max_steps: Optional[int] = None
     # Security configuration
     security_enabled: Optional[bool] = None
     security_level: Optional[str] = None
@@ -1148,6 +1151,15 @@ def _write_env_file(env_dict: dict) -> None:
     env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _resolve_agent_mode(env: dict) -> str:
+    """Resolve agent_mode with backward compatibility for PLAN_ENABLED."""
+    if "AGENT_MODE" in env:
+        return env["AGENT_MODE"]
+    # Fallback: old PLAN_ENABLED key
+    old = env.get("PLAN_ENABLED", "true")
+    return "task" if old.lower() == "true" else "simple"
+
+
 @app.get("/api/settings")
 async def get_settings():
     """Get current model configuration from .env."""
@@ -1184,8 +1196,11 @@ async def get_settings():
         # MCP configuration
         "mcp_enabled": env.get("MCP_ENABLED", "true").lower() == "true",
         "mcp_tool_cache_ttl": int(env.get("MCP_TOOL_CACHE_TTL", "3600")),
-        # Plan configuration
-        "plan_enabled": env.get("PLAN_ENABLED", "true").lower() == "true",
+        # Agent mode configuration (backward-compatible)
+        "agent_mode": _resolve_agent_mode(env),
+        "plan_revision_enabled": env.get("PLAN_REVISION_ENABLED", "true").lower() == "true",
+        "plan_require_approval": env.get("PLAN_REQUIRE_APPROVAL", "false").lower() == "true",
+        "plan_max_steps": int(env.get("PLAN_MAX_STEPS", "8")),
         # Security configuration
         "security_enabled": env.get("SECURITY_ENABLED", "true").lower() == "true",
         "security_level": env.get("SECURITY_LEVEL", "standard"),
@@ -1238,8 +1253,11 @@ async def update_settings(request: SettingsUpdateRequest):
         # MCP configuration
         "MCP_ENABLED": str(request.mcp_enabled).lower() if request.mcp_enabled is not None else None,
         "MCP_TOOL_CACHE_TTL": str(request.mcp_tool_cache_ttl) if request.mcp_tool_cache_ttl is not None else None,
-        # Plan configuration
-        "PLAN_ENABLED": str(request.plan_enabled).lower() if request.plan_enabled is not None else None,
+        # Agent mode configuration
+        "AGENT_MODE": request.agent_mode if request.agent_mode is not None else None,
+        "PLAN_REVISION_ENABLED": str(request.plan_revision_enabled).lower() if request.plan_revision_enabled is not None else None,
+        "PLAN_REQUIRE_APPROVAL": str(request.plan_require_approval).lower() if request.plan_require_approval is not None else None,
+        "PLAN_MAX_STEPS": str(request.plan_max_steps) if request.plan_max_steps is not None else None,
         # Security configuration
         "SECURITY_ENABLED": str(request.security_enabled).lower() if request.security_enabled is not None else None,
         "SECURITY_LEVEL": request.security_level if request.security_level is not None else None,

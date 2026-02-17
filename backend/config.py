@@ -145,10 +145,11 @@ class Settings(BaseSettings):
     security_docker_enabled: bool = Field(default=False)
     security_docker_network: str = Field(default="none")
 
-    # Agent / Plan Configuration
-    agent_mode: str = Field(default="task")  # "task" or "simple"
-    plan_enabled: bool = Field(default=True)
+    # Agent Mode Configuration
+    agent_mode: str = Field(default="task")  # "simple" | "task"
+    plan_revision_enabled: bool = Field(default=True)
     plan_require_approval: bool = Field(default=False)
+    plan_max_steps: int = Field(default=8)
 
     # Claude Code Skills compatibility
     claude_code_skills_dir: Optional[Path] = None
@@ -173,6 +174,14 @@ class Settings(BaseSettings):
             env_embed = os.getenv("EMBEDDING_MODEL", "")
             if env_embed:
                 self.embedding_model = env_embed
+
+        # Migrate old PLAN_ENABLED → agent_mode (backward compatibility)
+        if self.agent_mode == "task":  # still default — check for old config
+            raw = os.getenv("AGENT_MODE", "")
+            if not raw:
+                old = os.getenv("PLAN_ENABLED", "")
+                if old.lower() == "false":
+                    self.agent_mode = "simple"
 
         # Compute derived paths from data_dir
         data = self.get_data_path()

@@ -462,7 +462,10 @@ export default function SettingsDialog() {
         enable_prompt_cache: true,
         enable_translate_cache: true,
         mcp_enabled: true,
-        plan_enabled: true,
+        agent_mode: "task",
+        plan_revision_enabled: true,
+        plan_require_approval: false,
+        plan_max_steps: 8,
         security_enabled: true,
         security_level: "standard",
         security_approval_timeout: 60,
@@ -704,20 +707,67 @@ export default function SettingsDialog() {
                         {/* Task Tab */}
                         <TabsContent value="task" className="space-y-3 mt-0">
                             <p className="text-xs text-muted-foreground mb-3">
-                                配置 Agent 任务执行行为，如规划能力等
+                                选择 Agent 工作模式
                             </p>
-                            <ToggleField
-                                label="规划能力 (Plan)"
-                                checked={form.plan_enabled}
-                                onChange={(v) => updateField("plan_enabled", v)}
-                                hint="(复杂任务时 Agent 先制定计划再执行)"
-                            />
+                            {/* Mode Selector */}
+                            <div className="grid grid-cols-2 gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => updateField("agent_mode", "simple")}
+                                    className={`flex flex-col items-center gap-1 py-3 rounded-lg border text-xs font-medium transition-all ${form.agent_mode === "simple"
+                                        ? "border-primary bg-primary/10 text-primary"
+                                        : "border-border bg-background text-muted-foreground hover:border-primary/30"
+                                        }`}
+                                >
+                                    <Zap className="w-4 h-4" />
+                                    <span>简单模式</span>
+                                    <span className="text-[10px] text-muted-foreground/60 font-normal">ReAct 直接执行</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => updateField("agent_mode", "task")}
+                                    className={`flex flex-col items-center gap-1 py-3 rounded-lg border text-xs font-medium transition-all ${form.agent_mode === "task"
+                                        ? "border-primary bg-primary/10 text-primary"
+                                        : "border-border bg-background text-muted-foreground hover:border-primary/30"
+                                        }`}
+                                >
+                                    <ListChecks className="w-4 h-4" />
+                                    <span>任务模式</span>
+                                    <span className="text-[10px] text-muted-foreground/60 font-normal">自动规划执行</span>
+                                </button>
+                            </div>
+
+                            {/* Task Mode Sub-options (hidden when simple mode) */}
+                            {form.agent_mode === "task" && <div className="space-y-3">
+                                <label className="text-xs font-medium text-muted-foreground">任务模式选项</label>
+                                <ToggleField
+                                    label="规划修正"
+                                    checked={form.plan_revision_enabled}
+                                    onChange={(v) => updateField("plan_revision_enabled", v)}
+                                    hint="(执行中发现问题时自动修正后续步骤)"
+                                />
+                                <ToggleField
+                                    label="计划审批"
+                                    checked={form.plan_require_approval}
+                                    onChange={(v) => updateField("plan_require_approval", v)}
+                                    hint="(生成计划后需用户确认再执行)"
+                                />
+                                <SettingsField
+                                    label="最大步骤数"
+                                    value={String(form.plan_max_steps)}
+                                    onChange={(v) => updateField("plan_max_steps", parseInt(v) || 8)}
+                                    type="number"
+                                    placeholder="8"
+                                />
+                            </div>}
+
+                            {/* Mode Description */}
                             <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-1.5">
-                                <div className="text-xs font-medium text-muted-foreground">触发条件</div>
+                                <div className="text-xs font-medium text-muted-foreground">模式说明</div>
                                 <ul className="text-[11px] text-muted-foreground/70 space-y-1 list-disc list-inside">
-                                    <li>任务需要 3 个以上步骤</li>
-                                    <li>涉及多个不同工具的协作</li>
-                                    <li>用户明确要求「先制定计划」</li>
+                                    <li>简单问题自动跳过规划</li>
+                                    <li>复杂任务自动生成多步骤计划</li>
+                                    <li>开启修正后，执行失败时自动调整计划</li>
                                 </ul>
                             </div>
                         </TabsContent>
