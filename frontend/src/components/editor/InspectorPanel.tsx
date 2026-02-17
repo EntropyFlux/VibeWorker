@@ -141,7 +141,7 @@ export default function InspectorPanel({
 
     if (!filePath) {
         if (debugMode && sessionId) {
-            return <DebugPanel sessionId={sessionId} />;
+            return <DebugPanel sessionId={sessionId} onClose={onClose} />;
         }
         return (
             <div className="h-full flex items-center justify-center text-center p-6">

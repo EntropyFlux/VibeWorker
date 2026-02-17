@@ -185,6 +185,7 @@ export async function fetchSessions(): Promise<Session[]> {
 export interface SessionData {
   messages: ChatMessage[];
   debug_calls: (DebugLLMCall | DebugToolCall)[];
+  plan?: Plan;
 }
 
 export async function fetchSessionMessages(
@@ -195,6 +196,7 @@ export async function fetchSessionMessages(
   return {
     messages: data.messages || [],
     debug_calls: data.debug_calls || [],
+    plan: data.plan,
   };
 }
 

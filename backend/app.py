@@ -230,6 +230,7 @@ async def _stream_agent_response(message: str, history: list, session_id: str, d
     full_response = ""
     tool_calls_log = []
     debug_calls_log = []  # Collect debug events for persistence
+    current_plan = None  # Track plan state for persistence
 
     # Queue for approval requests from SecurityGate
     approval_queue: asyncio.Queue = asyncio.Queue()
@@ -327,12 +328,46 @@ async def _stream_agent_response(message: str, history: list, session_id: str, d
                     yield f"data: {sse_data}\n\n"
                     debug_calls_log.append(event)
 
+                elif event_type == "plan_created":
+                    # Track plan state for persistence
+                    if event.get("plan"):
+                        current_plan = event["plan"]
+                    sse_data = json.dumps(event, ensure_ascii=False)
+                    yield f"data: {sse_data}\n\n"
+
+                elif event_type == "plan_updated":
+                    # Update plan state
+                    if current_plan and current_plan.get("plan_id") == event.get("plan_id"):
+                        # Update step status
+                        step_id = event.get("step_id")
+                        status = event.get("status")
+                        if step_id and status:
+                            current_plan["steps"] = [
+                                {**s, "status": status} if s.get("id") == step_id else s
+                                for s in current_plan.get("steps", [])
+                            ]
+                    sse_data = json.dumps(event, ensure_ascii=False)
+                    yield f"data: {sse_data}\n\n"
+
+                elif event_type == "plan_revised":
+                    # Update plan with revised steps
+                    if current_plan and current_plan.get("plan_id") == event.get("plan_id"):
+                        revised_steps = event.get("revised_steps", [])
+                        keep_completed = event.get("keep_completed", 0)
+                        if revised_steps:
+                            # Keep completed steps and add revised ones
+                            completed_steps = current_plan.get("steps", [])[:keep_completed]
+                            current_plan["steps"] = completed_steps + revised_steps
+                    sse_data = json.dumps(event, ensure_ascii=False)
+                    yield f"data: {sse_data}\n\n"
+
                 elif event_type == "done":
                     # Save assistant response to session
                     if full_response:
                         session_manager.save_message(
                             session_id, "assistant", full_response,
                             tool_calls=tool_calls_log if tool_calls_log else None,
+                            plan=current_plan,
                         )
 
                     # Save debug calls if any
@@ -569,6 +604,7 @@ async def get_session(session_id: str):
         "session_id": session_id,
         "messages": session_data.get("messages", []),
         "debug_calls": session_data.get("debug_calls", []),
+        "plan": session_data.get("plan"),
     }
 
 

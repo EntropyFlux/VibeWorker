@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
-import { Bug, Trash2, ChevronRight, ChevronDown } from "lucide-react";
+import { Bug, X, ChevronRight, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { sessionStore, useSessionState } from "@/lib/sessionStore";
 import type { DebugLLMCall, DebugToolCall } from "@/lib/api";
@@ -24,6 +24,7 @@ function formatTokens(n: number | null): string {
 
 // ---- Debug Call Item ----
 function DebugCallItem({ call }: { call: DebugLLMCall | DebugToolCall }) {
+  // Always collapsed by default
   const [expanded, setExpanded] = useState(false);
 
   if (isLLMCall(call)) {
@@ -31,14 +32,14 @@ function DebugCallItem({ call }: { call: DebugLLMCall | DebugToolCall }) {
       <div className="rounded-lg border border-border bg-card/50 overflow-hidden">
         <button
           type="button"
-          className="w-full flex items-start gap-2 p-2.5 text-left hover:bg-muted/30 transition-colors"
+          className="w-full flex items-center gap-2 p-2.5 text-left hover:bg-muted/30 transition-colors"
           onClick={() => setExpanded(!expanded)}
         >
-          <span className="shrink-0 mt-0.5">
+          <span className="shrink-0">
             {expanded ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />}
           </span>
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 flex-wrap">
+            <div className="flex items-center gap-1.5">
               <span className="text-xs">&#x1F916;</span>
               <span className="text-xs font-medium">LLM</span>
               {call.node && (
@@ -49,18 +50,20 @@ function DebugCallItem({ call }: { call: DebugLLMCall | DebugToolCall }) {
               <span className="text-[10px] text-muted-foreground/70 font-mono truncate">
                 {call.model}
               </span>
+              <span className="text-[10px] text-muted-foreground/60 ml-auto">
+                {formatDuration(call.duration_ms)}
+              </span>
             </div>
-            <div className="flex items-center gap-2 mt-1 text-[10px] text-muted-foreground/60">
-              <span>{formatDuration(call.duration_ms)}</span>
-              {call.total_tokens != null && (
-                <span>{formatTokens(call.total_tokens)} tokens</span>
-              )}
-              {call.input_tokens != null && call.output_tokens != null && (
-                <span className="text-muted-foreground/40">
-                  ({formatTokens(call.input_tokens)} in / {formatTokens(call.output_tokens)} out)
-                </span>
-              )}
-            </div>
+            {call.total_tokens != null && (
+              <div className="text-[10px] text-muted-foreground/50 mt-0.5">
+                {formatTokens(call.total_tokens)} tokens
+                {call.input_tokens != null && call.output_tokens != null && (
+                  <span className="text-muted-foreground/40">
+                    {" "}({formatTokens(call.input_tokens)} in / {formatTokens(call.output_tokens)} out)
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </button>
         {expanded && (
@@ -88,14 +91,14 @@ function DebugCallItem({ call }: { call: DebugLLMCall | DebugToolCall }) {
     <div className="rounded-lg border border-border bg-card/50 overflow-hidden">
       <button
         type="button"
-        className="w-full flex items-start gap-2 p-2.5 text-left hover:bg-muted/30 transition-colors"
+        className="w-full flex items-center gap-2 p-2.5 text-left hover:bg-muted/30 transition-colors"
         onClick={() => setExpanded(!expanded)}
       >
-        <span className="shrink-0 mt-0.5">
+        <span className="shrink-0">
           {expanded ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />}
         </span>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 flex-wrap">
+          <div className="flex items-center gap-1.5">
             <span className="text-xs">&#x1F527;</span>
             <span className="text-xs font-medium">Tool</span>
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950 text-amber-600 dark:text-amber-400 font-mono">
@@ -106,9 +109,9 @@ function DebugCallItem({ call }: { call: DebugLLMCall | DebugToolCall }) {
                 cached
               </span>
             )}
-          </div>
-          <div className="flex items-center gap-2 mt-1 text-[10px] text-muted-foreground/60">
-            <span>{formatDuration(call.duration_ms)}</span>
+            <span className="text-[10px] text-muted-foreground/60 ml-auto">
+              {formatDuration(call.duration_ms)}
+            </span>
           </div>
         </div>
       </button>
@@ -165,9 +168,10 @@ function DebugSummary({ calls }: { calls: (DebugLLMCall | DebugToolCall)[] }) {
 // ---- Main Panel ----
 interface DebugPanelProps {
   sessionId: string;
+  onClose?: () => void;
 }
 
-export default function DebugPanel({ sessionId }: DebugPanelProps) {
+export default function DebugPanel({ sessionId, onClose }: DebugPanelProps) {
   const { debugCalls, isStreaming } = useSessionState(sessionId);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -177,10 +181,6 @@ export default function DebugPanel({ sessionId }: DebugPanelProps) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [debugCalls.length, isStreaming]);
-
-  const handleClear = () => {
-    sessionStore.clearDebugCalls(sessionId);
-  };
 
   return (
     <div className="h-full flex flex-col">
@@ -199,10 +199,10 @@ export default function DebugPanel({ sessionId }: DebugPanelProps) {
           variant="ghost"
           size="icon"
           className="w-6 h-6"
-          onClick={handleClear}
-          title="清除记录"
+          onClick={onClose}
+          title="关闭"
         >
-          <Trash2 className="w-3.5 h-3.5" />
+          <X className="w-3.5 h-3.5" />
         </Button>
       </div>
 

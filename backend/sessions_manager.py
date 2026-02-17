@@ -80,18 +80,18 @@ class SessionManager:
         """Get full session data including metadata."""
         path = self._session_path(session_id)
         if not path.exists():
-            return {"messages": [], "title": None}
+            return {"messages": [], "title": None, "plan": None}
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(data, list):
-                return {"messages": data, "title": None}
+                return {"messages": data, "title": None, "plan": None}
             return data
         except Exception as e:
             logger.error(f"Error reading session {session_id}: {e}")
-            return {"messages": [], "title": None}
+            return {"messages": [], "title": None, "plan": None}
 
     def save_message(self, session_id: str, role: str, content: str,
-                     tool_calls: Optional[list] = None) -> None:
+                     tool_calls: Optional[list] = None, plan: Optional[dict] = None) -> None:
         """Append a message to a session."""
         session_data = self.get_session_data(session_id)
         messages = session_data.get("messages", [])
@@ -104,6 +104,9 @@ class SessionManager:
             message["tool_calls"] = tool_calls
         messages.append(message)
         session_data["messages"] = messages
+        # Save plan if provided (from assistant message)
+        if plan:
+            session_data["plan"] = plan
         self._write_session_data(session_id, session_data)
 
     def create_session(self, session_id: Optional[str] = None) -> str:
@@ -112,7 +115,7 @@ class SessionManager:
             session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         path = self._session_path(session_id)
         if not path.exists():
-            self._write_session_data(session_id, {"messages": [], "title": None})
+            self._write_session_data(session_id, {"messages": [], "title": None, "plan": None})
         return session_id
 
     def delete_session(self, session_id: str) -> bool:
@@ -159,6 +162,17 @@ class SessionManager:
         """Get debug calls for a session."""
         session_data = self.get_session_data(session_id)
         return session_data.get("debug_calls", [])
+
+    def save_plan(self, session_id: str, plan: dict | None) -> None:
+        """Save plan data to the session."""
+        session_data = self.get_session_data(session_id)
+        session_data["plan"] = plan
+        self._write_session_data(session_id, session_data)
+
+    def get_plan(self, session_id: str) -> dict | None:
+        """Get plan data for a session."""
+        session_data = self.get_session_data(session_id)
+        return session_data.get("plan")
 
 
 # Singleton instance

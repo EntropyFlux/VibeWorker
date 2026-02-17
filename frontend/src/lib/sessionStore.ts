@@ -117,6 +117,7 @@ class SessionStore {
         this.updateSession(sessionId, {
           messages: sessionData.messages,
           debugCalls: sessionData.debug_calls,
+          currentPlan: sessionData.plan || null,
           messagesLoaded: true,
           messagesLoading: false,
         });
@@ -187,6 +188,10 @@ class SessionStore {
               tool: event.tool || "",
               input: event.input || "",
             });
+            // Notify app to show debug panel when atomic actions start
+            window.dispatchEvent(new CustomEvent("vibeworker-debug-activity", {
+              detail: { sessionId, type: "tool_start" },
+            }));
             break;
           }
 
@@ -275,6 +280,10 @@ class SessionStore {
                 timestamp: new Date().toISOString(),
               } as DebugLLMCall],
             });
+            // Notify app to show debug panel when LLM calls start
+            window.dispatchEvent(new CustomEvent("vibeworker-debug-activity", {
+              detail: { sessionId, type: "debug_llm_call" },
+            }));
             break;
           }
 
