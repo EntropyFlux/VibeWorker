@@ -145,7 +145,8 @@ class Settings(BaseSettings):
     security_docker_enabled: bool = Field(default=False)
     security_docker_network: str = Field(default="none")
 
-    # Plan Configuration
+    # Agent / Plan Configuration
+    agent_mode: str = Field(default="task")  # "task" or "simple"
     plan_enabled: bool = Field(default=True)
     plan_require_approval: bool = Field(default=False)
 
