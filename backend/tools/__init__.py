@@ -18,14 +18,13 @@ __all__ = [
     "create_memory_search_tool",
     "create_plan_create_tool",
     "create_plan_update_tool",
+    "get_executor_tools",
 ]
 
 
-def get_all_tools() -> list:
-    """Create and return all core tools + Plan tools + MCP tools, wrapped with security."""
-    from config import settings
-
-    tools = [
+def _get_core_tools() -> list:
+    """Return the 7 core tools (no plan tools, no MCP)."""
+    return [
         create_terminal_tool(),
         create_python_repl_tool(),
         create_fetch_url_tool(),
@@ -35,11 +34,9 @@ def get_all_tools() -> list:
         create_memory_search_tool(),
     ]
 
-    # Add Plan tools if enabled
-    if getattr(settings, "plan_enabled", True):
-        tools.append(create_plan_create_tool())
-        tools.append(create_plan_update_tool())
-    # Append MCP tools (dynamic, from connected MCP servers)
+
+def _append_mcp_tools(tools: list) -> list:
+    """Append MCP tools if available."""
     try:
         from mcp_module import mcp_manager
         mcp_tools = mcp_manager.get_all_mcp_tools()
@@ -47,13 +44,45 @@ def get_all_tools() -> list:
             tools.extend(mcp_tools)
     except Exception:
         pass  # MCP unavailable — does not affect core tools
+    return tools
 
-    # Wrap all tools with security gate (only when security is enabled)
+
+def _wrap_security(tools: list) -> list:
+    """Wrap tools with security gate if enabled."""
+    from config import settings
     try:
         if settings.security_enabled:
             from security import wrap_all_tools
             tools = wrap_all_tools(tools)
     except Exception:
         pass  # Security module unavailable — tools run unwrapped
+    return tools
 
+
+def get_all_tools() -> list:
+    """Create and return all core tools + Plan tools + MCP tools, wrapped with security."""
+    from config import settings
+
+    tools = _get_core_tools()
+
+    # Add Plan tools if enabled
+    if getattr(settings, "plan_enabled", True):
+        tools.append(create_plan_create_tool())
+        tools.append(create_plan_update_tool())
+
+    tools = _append_mcp_tools(tools)
+    tools = _wrap_security(tools)
+    return tools
+
+
+def get_executor_tools() -> list:
+    """Return tools for task-mode Executor sub-agent.
+
+    Includes 7 Core Tools + plan_update (no plan_create) + MCP tools,
+    wrapped with security.
+    """
+    tools = _get_core_tools()
+    tools.append(create_plan_update_tool())
+    tools = _append_mcp_tools(tools)
+    tools = _wrap_security(tools)
     return tools

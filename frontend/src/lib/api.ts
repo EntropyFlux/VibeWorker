@@ -101,7 +101,7 @@ export interface DebugDivider {
 export type DebugCall = DebugLLMCall | DebugToolCall | DebugDivider;
 
 export interface SSEEvent {
-  type: "token" | "tool_start" | "tool_end" | "llm_start" | "llm_end" | "done" | "error" | "approval_request" | "plan_created" | "plan_updated" | "plan_revised" | "debug_llm_call";
+  type: "token" | "tool_start" | "tool_end" | "llm_start" | "llm_end" | "done" | "error" | "approval_request" | "plan_created" | "plan_updated" | "plan_revised" | "plan_approval_request" | "debug_llm_call";
   content?: string;
   tool?: string;
   input?: string;
@@ -114,7 +114,7 @@ export interface SSEEvent {
   risk_level?: "safe" | "warn" | "dangerous" | "blocked";
   // Plan fields
   plan?: Plan;        // plan_created event
-  plan_id?: string;   // plan_updated event
+  plan_id?: string;   // plan_updated / plan_revised / plan_approval_request event
   step_id?: number;   // plan_updated event
   status?: string;    // plan_updated event (step status)
   // Plan revision fields
@@ -418,6 +418,21 @@ export async function sendApproval(
   if (!res.ok) {
     const err = await res.json();
     throw new Error(err.detail || "Failed to send approval");
+  }
+}
+
+export async function sendPlanApproval(
+  planId: string,
+  approved: boolean
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/plan/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ plan_id: planId, approved }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to send plan approval");
   }
 }
 

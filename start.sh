@@ -133,15 +133,27 @@ stop_process() {
     rm -f "$PID_DIR/$name.pid"
 }
 
+kill_port() {
+    local port=$1
+    local pids
+    pids=$(lsof -ti :"$port" 2>/dev/null || true)
+    if [[ -n "$pids" ]]; then
+        echo "$pids" | xargs kill -9 2>/dev/null || true
+        log_info "已清理端口 $port 上的残留进程"
+    fi
+}
+
 stop_backend() {
     stop_process "backend"
+    # uvicorn reload=True 会 fork 子进程，PID 文件只记录父进程
+    # 兜底：杀掉仍占用端口的进程
+    kill_port 8088
 }
 
 stop_frontend() {
     stop_process "frontend"
     # Next.js 可能有子进程，尝试清理
-    pkill -f "next-server" 2>/dev/null || true
-    pkill -f "next dev" 2>/dev/null || true
+    kill_port 3000
 }
 
 show_status() {

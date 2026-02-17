@@ -8,6 +8,8 @@ setlocal EnableDelayedExpansion
 set "SCRIPT_DIR=%~dp0"
 set "BACKEND_DIR=%SCRIPT_DIR%backend"
 set "FRONTEND_DIR=%SCRIPT_DIR%frontend"
+set "BACKEND_PORT=8088"
+set "FRONTEND_PORT=3000"
 
 if "%1"=="" goto :start
 if "%1"=="start" goto :start
@@ -35,20 +37,20 @@ if exist "venv\Scripts\activate.bat" (
 )
 
 start "VibeWorker-Backend" /min cmd /c "python app.py"
-echo [INFO] 后端启动中... http://localhost:8088
+echo [INFO] 后端启动中... http://localhost:%BACKEND_PORT%
 
 :: 启动前端
 echo [INFO] 启动前端服务...
 cd /d "%FRONTEND_DIR%"
 start "VibeWorker-Frontend" /min cmd /c "npm run dev"
-echo [INFO] 前端启动中... http://localhost:3000
+echo [INFO] 前端启动中... http://localhost:%FRONTEND_PORT%
 
 echo.
 echo ========== VibeWorker 启动完成 ==========
-echo 后端: http://localhost:8088
-echo 前端: http://localhost:3000
+echo 后端: http://localhost:%BACKEND_PORT%
+echo 前端: http://localhost:%FRONTEND_PORT%
 echo.
-echo 提示: 服务运行在最小化窗口中，关闭窗口即可停止服务
+echo 提示: 使用 start.bat stop 停止服务
 echo ==========================================
 goto :end
 
@@ -56,20 +58,13 @@ goto :end
 echo [INFO] 停止 VibeWorker...
 echo.
 
-:: 停止后端 (Python)
-echo [INFO] 停止后端...
-taskkill /FI "WINDOWTITLE eq VibeWorker-Backend*" /F >nul 2>&1
-for /f "tokens=2" %%a in ('tasklist /fi "imagename eq python.exe" /v ^| findstr /i "app.py"') do (
-    taskkill /PID %%a /F >nul 2>&1
-)
+:: 停止占用后端端口的进程
+call :kill_port %BACKEND_PORT% "后端"
 
-:: 停止前端 (Node)
-echo [INFO] 停止前端...
-taskkill /FI "WINDOWTITLE eq VibeWorker-Frontend*" /F >nul 2>&1
-for /f "tokens=2" %%a in ('tasklist /fi "imagename eq node.exe" /v ^| findstr /i "next"') do (
-    taskkill /PID %%a /F >nul 2>&1
-)
+:: 停止占用前端端口的进程
+call :kill_port %FRONTEND_PORT% "前端"
 
+echo.
 echo [INFO] VibeWorker 已停止
 goto :end
 
@@ -84,18 +79,24 @@ goto :end
 echo.
 echo ========== VibeWorker 状态 ==========
 
-:: 检查后端
-tasklist /fi "imagename eq python.exe" /v 2>nul | findstr /i "app.py" >nul
-if %errorlevel%==0 (
-    echo 后端: [运行中] http://localhost:8088
+:: 检查后端端口
+set "BACKEND_RUNNING=0"
+for /f "tokens=5" %%a in ('netstat -ano 2^>nul ^| findstr "LISTENING" ^| findstr ":%BACKEND_PORT% "') do (
+    set "BACKEND_RUNNING=1"
+)
+if "!BACKEND_RUNNING!"=="1" (
+    echo 后端: [运行中] http://localhost:%BACKEND_PORT%
 ) else (
     echo 后端: [未运行]
 )
 
-:: 检查前端
-tasklist /fi "imagename eq node.exe" /v 2>nul | findstr /i "next" >nul
-if %errorlevel%==0 (
-    echo 前端: [运行中] http://localhost:3000
+:: 检查前端端口
+set "FRONTEND_RUNNING=0"
+for /f "tokens=5" %%a in ('netstat -ano 2^>nul ^| findstr "LISTENING" ^| findstr ":%FRONTEND_PORT% "') do (
+    set "FRONTEND_RUNNING=1"
+)
+if "!FRONTEND_RUNNING!"=="1" (
+    echo 前端: [运行中] http://localhost:%FRONTEND_PORT%
 ) else (
     echo 前端: [未运行]
 )
@@ -103,6 +104,24 @@ if %errorlevel%==0 (
 echo =====================================
 echo.
 goto :end
+
+:kill_port
+:: 杀死占用指定端口的所有进程
+:: %1 = 端口号, %2 = 显示名称
+set "FOUND=0"
+for /f "tokens=5" %%a in ('netstat -ano 2^>nul ^| findstr "LISTENING" ^| findstr ":%~1 "') do (
+    if not "%%a"=="0" (
+        taskkill /PID %%a /F >nul 2>&1
+        if not errorlevel 1 (
+            echo [INFO] 停止%~2 (PID: %%a, 端口: %~1)
+            set "FOUND=1"
+        )
+    )
+)
+if "!FOUND!"=="0" (
+    echo [INFO] %~2未运行 (端口 %~1 空闲)
+)
+goto :eof
 
 :help
 echo.

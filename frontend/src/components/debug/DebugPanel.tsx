@@ -77,6 +77,25 @@ function DebugCallItem({ call }: { call: DebugLLMCall | DebugToolCall }) {
   }
 
   if (isLLMCall(call)) {
+    // Node-specific label colors for task mode
+    const nodeColorMap: Record<string, string> = {
+      planner: "bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300",
+      executor: "bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-300",
+      replanner: "bg-orange-100 dark:bg-orange-950 text-orange-700 dark:text-orange-300",
+      router: "bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300",
+      agent: "bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400",
+    };
+    const nodeLabel: Record<string, string> = {
+      planner: "Planner",
+      executor: "Executor",
+      replanner: "Replanner",
+      router: "Router",
+      agent: call.node || "agent",
+    };
+
+    const nodeCls = call.node ? (nodeColorMap[call.node] || nodeColorMap.agent) : nodeColorMap.agent;
+    const nodeText = call.node ? (nodeLabel[call.node] || call.node) : "";
+
     return (
       <div className={`rounded-lg border border-border overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300 ${bgClass}`}>
         <button
@@ -91,9 +110,9 @@ function DebugCallItem({ call }: { call: DebugLLMCall | DebugToolCall }) {
             <div className="flex items-center gap-1.5">
               <span className="text-xs">&#x1F916;</span>
               <span className="text-xs font-medium">LLM</span>
-              {call.node && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-mono">
-                  {call.node}
+              {nodeText && (
+                <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold ${nodeCls}`}>
+                  {nodeText}
                 </span>
               )}
               <span className="text-[10px] text-muted-foreground/70 font-mono truncate">
@@ -118,16 +137,20 @@ function DebugCallItem({ call }: { call: DebugLLMCall | DebugToolCall }) {
         <div
           ref={contentRef}
           className={`overflow-hidden transition-all duration-300 ease-in-out ${
-            expanded ? "max-h-[600px] opacity-100" : "max-h-0 opacity-0"
+            expanded ? "max-h-[800px] opacity-100" : "max-h-0 opacity-0"
           }`}
         >
           <div className="border-t border-border px-3 py-2 space-y-2">
+            {/* Input */}
             <div>
-              <div className="text-[10px] font-medium text-muted-foreground/70 uppercase tracking-wider mb-1">Input</div>
-              <pre className="text-[11px] font-mono whitespace-pre-wrap break-all bg-muted/30 rounded-md p-2 max-h-[200px] overflow-auto text-foreground/80">
+              <div className="text-[10px] font-medium text-muted-foreground/70 uppercase tracking-wider mb-1">
+                Input ({call.input?.length || 0} chars)
+              </div>
+              <pre className="text-[11px] font-mono whitespace-pre-wrap break-all bg-muted/30 rounded-md p-2 max-h-[500px] overflow-auto text-foreground/80">
                 {call.input || "(empty)"}
               </pre>
             </div>
+            {/* Output */}
             <div>
               <div className="text-[10px] font-medium text-muted-foreground/70 uppercase tracking-wider mb-1">Output</div>
               <pre className="text-[11px] font-mono whitespace-pre-wrap break-all bg-muted/30 rounded-md p-2 max-h-[200px] overflow-auto text-foreground/80">

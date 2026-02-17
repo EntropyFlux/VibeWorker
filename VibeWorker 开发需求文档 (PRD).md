@@ -659,8 +659,9 @@ vibeworker/
 │   │   └── ...                 # terminal, python_repl, fetch_url, read_file, rag
 │   ├── mcp_module/             # MCP 集成模块（避免与 pip 包冲突）
 │   ├── security/               # 安全沙箱模块
+│   ├── plan_approval.py        # Plan Approval 共享模块
 │   └── graph/                  # LangGraph Agent 编排
-│       └── agent.py            # create_agent 配置
+│       └── agent.py            # 混合 Agent 架构（Phase 1 + Phase 2）
 │
 ├── ~/.vibeworker/              # 用户数据目录（所有可写数据，与源码隔离）
 │   ├── .env                    # 用户环境变量（全局参数，首次从 user_default/.env 复制）
@@ -714,4 +715,45 @@ vibeworker/
 - `~/.vibeworker/` 为用户数据目录（`DATA_DIR`），可通过环境变量自定义
 - 首次运行时，`config.py` 自动将 `user_default/` 下的模板复制到 `~/.vibeworker/`
 - 安全校验：`DATA_DIR` 不允许指向 `PROJECT_ROOT` 内部，否则自动回退到 `~/.vibeworker/`
+
+## 混合 Agent 架构 (Hybrid Agent Architecture)
+
+VibeWorker 采用统一的混合 Agent 架构，以 ReAct agent 为唯一入口，当任务需要结构化执行时自动切换到 Plan 执行模式。
+
+### Phase 1: ReAct Agent（统一入口）
+
+所有用户请求都由 ReAct agent 处理。Agent 拥有全部工具（7 个 Core Tools + plan_create + plan_update + MCP 工具）。
+
+- **简单任务**：直接回答或调用工具，流程结束
+- **复杂任务**：Agent 自主判断后调用 `plan_create` 工具，触发 Phase 2
+
+### Phase 2: Plan Execution Loop（自动触发）
+
+当 `plan_create` 被调用后，系统自动进入 Phase 2：
+
+1. **Approval Gate**（可选）：如果 `plan_require_approval=true`，发送 `plan_approval_request` SSE 事件，等待用户确认
+2. **Executor 子 Agent**：为每个步骤创建独立的 ReAct 子 agent（`create_react_agent` + executor 工具集），隔离 context
+3. **流式输出**：子 agent 的 token/tool/llm 事件与 Phase 1 格式完全一致
+4. **Replanner 评估**：每步完成后调用 Replanner LLM 评估
+   - `continue`: 继续执行下一步
+   - `revise`: 修改后续步骤，发送 `plan_revised` SSE 事件
+   - `finish`: 提前完成，输出最终回复
+
+### 配置项
+
+| 配置 | 默认值 | 说明 |
+|------|--------|------|
+| `plan_enabled` | `true` | 是否启用 plan_create 工具 |
+| `plan_revision_enabled` | `true` | 是否启用 Replanner 评估 |
+| `plan_require_approval` | `false` | 是否需要用户确认后才执行 |
+| `plan_max_steps` | `8` | 单个计划最大步骤数 |
+
+### SSE 事件
+
+| 事件类型 | 触发时机 | 说明 |
+|----------|----------|------|
+| `plan_created` | plan_create 工具执行 | 前端显示 PlanCard |
+| `plan_updated` | 步骤状态变更 | 更新步骤状态 (running/completed/failed) |
+| `plan_revised` | Replanner 修改步骤 | 更新 PlanCard 步骤列表 |
+| `plan_approval_request` | Phase 2 入口 | 前端显示确认按钮 |
 

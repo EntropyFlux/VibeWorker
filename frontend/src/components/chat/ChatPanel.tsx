@@ -216,8 +216,8 @@ export default function ChatPanel({
     onFileOpen,
 }: ChatPanelProps) {
     // Store-driven state
-    const { messages, isStreaming, streamingContent, thinkingSteps, approvalRequest, currentPlan } = useSessionState(sessionId);
-    const { sendMessage, stopStream, clearApproval, addSessionAllowedTool } = useSessionActions(sessionId);
+    const { messages, isStreaming, streamingContent, thinkingSteps, approvalRequest, planApprovalRequest, currentPlan } = useSessionState(sessionId);
+    const { sendMessage, stopStream, clearApproval, addSessionAllowedTool, approvePlan } = useSessionActions(sessionId);
 
     // Local UI state
     const [inputValue, setInputValue] = useState("");
@@ -378,7 +378,12 @@ export default function ChatPanel({
                     <div className="mb-4 animate-fade-in-up">
                         {/* Live Plan Card */}
                         {currentPlan && (
-                            <PlanCard plan={currentPlan} isLive />
+                            <PlanCard
+                              plan={currentPlan}
+                              isLive
+                              awaitingApproval={!!planApprovalRequest && planApprovalRequest.plan_id === currentPlan.plan_id}
+                              onApprove={approvePlan}
+                            />
                         )}
                         {/* Live thinking steps - grouped by tool */}
                         {thinkingSteps.length > 0 && (

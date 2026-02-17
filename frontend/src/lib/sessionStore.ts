@@ -1,5 +1,5 @@
 import { useSyncExternalStore, useEffect, useCallback } from "react";
-import { streamChat, fetchSessionMessages, sendApproval, type ChatMessage, type ToolCall, type Plan, type PlanStep, type PlanRevision, type DebugLLMCall, type DebugToolCall, type DebugDivider, type DebugCall } from "./api";
+import { streamChat, fetchSessionMessages, sendApproval, sendPlanApproval, type ChatMessage, type ToolCall, type Plan, type PlanStep, type PlanRevision, type DebugLLMCall, type DebugToolCall, type DebugDivider, type DebugCall } from "./api";
 
 // Helper to check if a debug call is an LLM call
 export function isLLMCall(call: DebugCall): call is DebugLLMCall {
@@ -31,12 +31,19 @@ export interface ApprovalRequestData {
   risk_level: string;
 }
 
+export interface PlanApprovalRequestData {
+  plan_id: string;
+  plan: Plan;
+  timestamp: string;
+}
+
 export interface SessionState {
   messages: ChatMessage[];
   isStreaming: boolean;
   streamingContent: string;
   thinkingSteps: ThinkingStep[];
   approvalRequest: ApprovalRequestData | null;
+  planApprovalRequest: PlanApprovalRequestData | null;
   currentPlan: Plan | null;
   messagesLoaded: boolean;
   messagesLoading: boolean;
@@ -52,6 +59,7 @@ function defaultState(): SessionState {
     streamingContent: "",
     thinkingSteps: [],
     approvalRequest: null,
+    planApprovalRequest: null,
     currentPlan: null,
     messagesLoaded: false,
     messagesLoading: false,
@@ -307,6 +315,7 @@ class SessionStore {
           case "llm_start": {
             // Add LLM call to debugCalls immediately when it starts (for real-time display)
             if (debugEnabled) {
+              console.log("[llm_start] node:", event.node, "call_id:", event.call_id, "input.length:", event.input?.length);
               const calls = this.getState(sessionId).debugCalls;
               this.updateSession(sessionId, {
                 debugCalls: [...calls, {
@@ -335,17 +344,20 @@ class SessionStore {
           case "llm_end": {
             // Update the in-progress LLM call with final data
             if (debugEnabled) {
+              console.log("[llm_end] node:", event.node, "call_id:", event.call_id, "input.length:", event.input?.length);
               const calls = this.getState(sessionId).debugCalls.slice();
               // Find the last in-progress call for this call_id
               for (let i = calls.length - 1; i >= 0; i--) {
                 const call = calls[i];
                 if (isLLMCall(call) && call.call_id === event.call_id && call._inProgress) {
+                  console.log("[llm_end] Found match! Old input.length:", call.input?.length, "New input.length:", (event.input || call.input)?.length);
                   calls[i] = {
                     ...call,
                     duration_ms: event.duration_ms ?? null,
                     input_tokens: event.input_tokens ?? null,
                     output_tokens: event.output_tokens ?? null,
                     total_tokens: event.total_tokens ?? null,
+                    input: event.input || call.input,  // Update input from llm_end event
                     output: event.output || "",
                     _inProgress: false,
                   };
@@ -402,6 +414,40 @@ class SessionStore {
                 ),
               };
               this.updateSession(sessionId, { currentPlan: updatedPlan });
+            }
+            break;
+          }
+
+          case "plan_revised": {
+            const planForRevise = this.getState(sessionId).currentPlan;
+            if (planForRevise && planForRevise.plan_id === event.plan_id) {
+              const keepCompleted = event.keep_completed || 0;
+              const revisedSteps = event.revised_steps || [];
+              const completedSteps = planForRevise.steps.slice(0, keepCompleted);
+              const revisedPlan: Plan = {
+                ...planForRevise,
+                steps: [
+                  ...completedSteps,
+                  ...revisedSteps.map((s) => ({
+                    ...s,
+                    _revised: true,  // Mark as revised for UI
+                  })),
+                ] as PlanStep[],
+              };
+              this.updateSession(sessionId, { currentPlan: revisedPlan });
+            }
+            break;
+          }
+
+          case "plan_approval_request": {
+            if (event.plan) {
+              this.updateSession(sessionId, {
+                planApprovalRequest: {
+                  plan_id: event.plan_id || "",
+                  plan: event.plan,
+                  timestamp: new Date().toISOString(),
+                },
+              });
             }
             break;
           }
@@ -501,6 +547,19 @@ class SessionStore {
     this.updateSession(sessionId, { approvalRequest: null });
   }
 
+  clearPlanApproval(sessionId: string): void {
+    this.updateSession(sessionId, { planApprovalRequest: null });
+  }
+
+  async approvePlan(sessionId: string, planId: string, approved: boolean): Promise<void> {
+    try {
+      await sendPlanApproval(planId, approved);
+    } catch (err) {
+      console.error("Failed to send plan approval:", err);
+    }
+    this.clearPlanApproval(sessionId);
+  }
+
   clearDebugCalls(sessionId: string): void {
     this.updateSession(sessionId, { debugCalls: [] });
   }
@@ -583,6 +642,10 @@ export function useSessionActions(sessionId: string) {
     ),
     addSessionAllowedTool: useCallback(
       (tool: string) => sessionStore.addSessionAllowedTool(sessionId, tool),
+      [sessionId],
+    ),
+    approvePlan: useCallback(
+      (planId: string, approved: boolean) => sessionStore.approvePlan(sessionId, planId, approved),
       [sessionId],
     ),
   };

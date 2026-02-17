@@ -489,6 +489,27 @@ async def _next_event(gen):
 
 
 # ============================================
+# API Routes: Plan Approval
+# ============================================
+from plan_approval import resolve_plan_approval
+
+
+class PlanApprovalRequest(BaseModel):
+    plan_id: str
+    approved: bool
+
+
+@app.post("/api/plan/approve")
+async def approve_plan(request: PlanApprovalRequest):
+    """Approve or deny a pending plan execution."""
+    resolved = resolve_plan_approval(request.plan_id, request.approved)
+    if resolved:
+        return {"status": "ok", "plan_id": request.plan_id, "approved": request.approved}
+    else:
+        raise HTTPException(status_code=404, detail="Plan approval request not found or expired")
+
+
+# ============================================
 # API Routes: Security / Approval
 # ============================================
 class ApprovalRequest(BaseModel):

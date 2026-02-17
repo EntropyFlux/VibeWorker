@@ -146,7 +146,8 @@ class Settings(BaseSettings):
     security_docker_network: str = Field(default="none")
 
     # Agent Mode Configuration
-    agent_mode: str = Field(default="task")  # "simple" | "task"
+    agent_mode: str = Field(default="task")  # Deprecated: no longer affects runtime. Kept for backward compat.
+    plan_enabled: bool = Field(default=True)  # Whether plan_create tool is available
     plan_revision_enabled: bool = Field(default=True)
     plan_require_approval: bool = Field(default=False)
     plan_max_steps: int = Field(default=8)

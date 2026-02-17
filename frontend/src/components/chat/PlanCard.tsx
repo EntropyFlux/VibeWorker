@@ -1,12 +1,15 @@
 "use client";
 
 import React, { useState } from "react";
-import type { Plan } from "@/lib/api";
+import type { Plan, PlanStep } from "@/lib/api";
 
 interface PlanCardProps {
   plan: Plan;
   isLive?: boolean;
   defaultCollapsed?: boolean;
+  /** Show approval buttons when plan_require_approval is enabled */
+  awaitingApproval?: boolean;
+  onApprove?: (planId: string, approved: boolean) => void;
 }
 
 function StepIcon({ status, isLive }: { status: string; isLive?: boolean }) {
@@ -28,7 +31,13 @@ function StepIcon({ status, isLive }: { status: string; isLive?: boolean }) {
   }
 }
 
-export default function PlanCard({ plan, isLive = false, defaultCollapsed = false }: PlanCardProps) {
+export default function PlanCard({
+  plan,
+  isLive = false,
+  defaultCollapsed = false,
+  awaitingApproval = false,
+  onApprove,
+}: PlanCardProps) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const completedCount = plan.steps.filter((s) => s.status === "completed").length;
   const failedCount = plan.steps.filter((s) => s.status === "failed").length;
@@ -47,6 +56,11 @@ export default function PlanCard({ plan, isLive = false, defaultCollapsed = fals
         <span className="text-sm font-semibold text-foreground truncate">
           {plan.title}
         </span>
+        {awaitingApproval && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 font-medium animate-pulse">
+            &#x23F3; 等待确认
+          </span>
+        )}
         <span className="ml-auto flex items-center gap-2">
           {allDone ? (
             <span className="text-xs text-green-600 font-medium">&#x2705; 已完成</span>
@@ -66,24 +80,58 @@ export default function PlanCard({ plan, isLive = false, defaultCollapsed = fals
         <>
           {/* Steps */}
           <div className="px-4 py-2.5 space-y-1.5">
-            {plan.steps.map((step) => (
-              <div
-                key={step.id}
-                className={`flex items-center gap-2.5 py-1 text-sm transition-opacity ${
-                  step.status === "completed"
-                    ? "text-muted-foreground"
-                    : step.status === "running"
-                    ? "text-foreground font-medium"
-                    : "text-muted-foreground/70"
-                }`}
-              >
-                <StepIcon status={step.status} isLive={isLive} />
-                <span className="truncate">
-                  {step.id}. {step.title}
-                </span>
-              </div>
-            ))}
+            {plan.steps.map((step) => {
+              const isRevised = !!(step as PlanStep & { _revised?: boolean })._revised;
+              return (
+                <div
+                  key={step.id}
+                  className={`flex items-center gap-2.5 py-1 text-sm transition-opacity ${
+                    step.status === "completed"
+                      ? "text-muted-foreground"
+                      : step.status === "running"
+                      ? "text-foreground font-medium"
+                      : "text-muted-foreground/70"
+                  }`}
+                >
+                  <StepIcon status={step.status} isLive={isLive} />
+                  <span className="truncate">
+                    {step.id}. {step.title}
+                  </span>
+                  {isRevised && (
+                    <span className="text-[10px] px-1 py-0.5 rounded bg-orange-100 dark:bg-orange-950 text-orange-600 dark:text-orange-400 shrink-0">
+                      &#x1F504; 已调整
+                    </span>
+                  )}
+                </div>
+              );
+            })}
           </div>
+
+          {/* Approval Buttons */}
+          {awaitingApproval && onApprove && (
+            <div className="px-4 py-2.5 border-t border-border/40 flex items-center gap-2">
+              <button
+                type="button"
+                className="flex-1 py-1.5 px-3 rounded-md text-xs font-medium bg-[var(--vw-blue)] text-white hover:opacity-90 transition-opacity"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onApprove(plan.plan_id, true);
+                }}
+              >
+                &#x2705; 确认执行
+              </button>
+              <button
+                type="button"
+                className="flex-1 py-1.5 px-3 rounded-md text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onApprove(plan.plan_id, false);
+                }}
+              >
+                &#x274C; 取消
+              </button>
+            </div>
+          )}
 
           {/* Progress Bar */}
           <div className="px-4 pb-3 pt-1">

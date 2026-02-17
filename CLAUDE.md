@@ -34,13 +34,16 @@ cd frontend && npm run build
 
 ## 后端架构
 
-### 1. Agent 编排引擎
+### 1. Agent 编排引擎（混合架构）
 
 **文件：** `backend/graph/agent.py`
 
 - ✅ **必须**用 `langchain.agents.create_agent` API（LangChain 1.0+）
 - ❌ **严禁**用旧版 `AgentExecutor` 或早期 `create_react_agent`
-- 工作流：LLM → 识别 Tool → 执行 → 迭代 → SSE 流式返回
+- **Phase 1**：ReAct agent 统一入口，拥有全部工具（含 plan_create）
+- **Phase 2**：当 agent 调用 `plan_create` 后自动触发 → 逐步 Executor 子 agent + Replanner 评估
+- **Approval Gate**：可选，`plan_require_approval=true` 时等待用户确认
+- 工作流：Phase 1（LLM → Tool → 迭代） → [plan_create 触发] → Phase 2（Executor Loop + Replanner）
 
 ### 2. Core Tools（7 个内置工具，`backend/tools/`）
 
@@ -280,7 +283,7 @@ frontend/src/
 
 ```
 backend/
-├── app.py, config.py, model_pool.py, prompt_builder.py, sessions_manager.py, memory_manager.py
+├── app.py, config.py, model_pool.py, prompt_builder.py, sessions_manager.py, memory_manager.py, plan_approval.py
 ├── requirements.txt, mcp_servers.json
 ├── memory/ (logs/, MEMORY.md)
 ├── sessions/               # JSON 会话
@@ -288,7 +291,7 @@ backend/
 ├── workspace/              # SOUL.md, IDENTITY.md, USER.md, AGENTS.md
 ├── tools/                  # 7 个 Core Tools + __init__.py (get_all_tools)
 ├── mcp_module/             # __init__.py, config.py, manager.py, tool_wrapper.py
-├── graph/agent.py          # LangGraph Agent
+├── graph/agent.py          # 混合 Agent 架构（Phase 1 + Phase 2）
 ├── cache/                  # L1+L2 缓存模块 + tool_cache_decorator.py
 ├── .cache/                 # 缓存存储 (url/ llm/ prompt/ translate/ tool_mcp_*/)
 ├── knowledge/              # RAG 文档
