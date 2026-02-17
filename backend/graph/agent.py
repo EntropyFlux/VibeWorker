@@ -228,7 +228,24 @@ async def _run_agent_no_cache(
                             "total_tokens": getattr(um, "total_tokens", None) or (um.get("total_tokens") if isinstance(um, dict) else None),
                         }
 
-                    output_text = str(output_msg.content) if output_msg and hasattr(output_msg, "content") else ""
+                    # Extract output text with multiple fallbacks
+                    output_text = ""
+                    if output_msg:
+                        if hasattr(output_msg, "content"):
+                            content = output_msg.content
+                            # Handle list content (some models return [{"text": "..."}])
+                            if isinstance(content, list):
+                                output_text = " ".join(
+                                    item.get("text", str(item)) if isinstance(item, dict) else str(item)
+                                    for item in content
+                                )
+                            else:
+                                output_text = str(content) if content else ""
+                        # Fallback: try to get from additional_kwargs
+                        elif hasattr(output_msg, "additional_kwargs") and output_msg.additional_kwargs:
+                            output_text = str(output_msg.additional_kwargs.get("content", ""))
+                        else:
+                            output_text = str(output_msg)
 
                     from model_pool import resolve_model
                     model_name = resolve_model("llm").get("model", "unknown")
