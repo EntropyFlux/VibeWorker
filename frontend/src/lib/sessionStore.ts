@@ -1,5 +1,5 @@
 import { useSyncExternalStore, useEffect, useCallback } from "react";
-import { streamChat, fetchSessionMessages, sendApproval, sendPlanApproval, type ChatMessage, type ToolCall, type Plan, type PlanStep, type PlanRevision, type DebugLLMCall, type DebugToolCall, type DebugDivider, type DebugCall } from "./api";
+import { streamChat, fetchSessionMessages, sendApproval, sendPlanApproval, type ChatMessage, type ToolCall, type MessageSegment, type Plan, type PlanStep, type PlanRevision, type DebugLLMCall, type DebugToolCall, type DebugDivider, type DebugCall } from "./api";
 
 // Helper to check if a debug call is an LLM call
 export function isLLMCall(call: DebugCall): call is DebugLLMCall {
@@ -41,6 +41,8 @@ export interface SessionState {
   messages: ChatMessage[];
   isStreaming: boolean;
   streamingContent: string;
+  // 流式过程中按时间顺序积累的消息片段
+  streamingSegments: MessageSegment[];
   thinkingSteps: ThinkingStep[];
   approvalRequest: ApprovalRequestData | null;
   planApprovalRequest: PlanApprovalRequestData | null;
@@ -57,6 +59,7 @@ function defaultState(): SessionState {
     messages: [],
     isStreaming: false,
     streamingContent: "",
+    streamingSegments: [],
     thinkingSteps: [],
     approvalRequest: null,
     planApprovalRequest: null,
@@ -175,6 +178,7 @@ class SessionStore {
       messages: [...prevMessages, userMsg],
       isStreaming: true,
       streamingContent: "",
+      streamingSegments: [],
       thinkingSteps: [],
       approvalRequest: null,
       // 累积显示 debug 记录，不清空，但添加分隔卡片
@@ -190,14 +194,27 @@ class SessionStore {
 
     let fullContent = "";
     const toolCalls: ToolCall[] = [];
+    // 按时间顺序积累的消息片段
+    const segments: MessageSegment[] = [];
 
     try {
       for await (const event of streamChat(message, sessionId, controller.signal, debugEnabled)) {
         switch (event.type) {
-          case "token":
+          case "token": {
             fullContent += event.content || "";
-            this.updateSession(sessionId, { streamingContent: fullContent });
+            // 追加到 segments 的最后一个文本片段，如果没有则新建
+            const lastSeg = segments[segments.length - 1];
+            if (lastSeg && lastSeg.type === "text") {
+              lastSeg.content += event.content || "";
+            } else {
+              segments.push({ type: "text", content: event.content || "" });
+            }
+            this.updateSession(sessionId, {
+              streamingContent: fullContent,
+              streamingSegments: [...segments],
+            });
             break;
+          }
 
           case "tool_start": {
             const currentSteps = this.getState(sessionId).thinkingSteps;
@@ -214,6 +231,15 @@ class SessionStore {
             toolCalls.push({
               tool: event.tool || "",
               input: event.input || "",
+            });
+            // 在 segments 中按时间顺序插入工具调用片段
+            segments.push({
+              type: "tool",
+              tool: event.tool || "",
+              input: event.input || "",
+            });
+            this.updateSession(sessionId, {
+              streamingSegments: [...segments],
             });
             // Add to debugCalls immediately when tool starts (for real-time display)
             if (debugEnabled) {
@@ -267,6 +293,19 @@ class SessionStore {
                 break;
               }
             }
+
+            // 更新 segments 中对应工具调用的 output
+            for (let si = segments.length - 1; si >= 0; si--) {
+              const seg = segments[si];
+              if (seg.type === "tool" && seg.tool === (event.tool || "") && !seg.output) {
+                seg.output = output;
+                if (isCached) seg.cached = true;
+                break;
+              }
+            }
+            this.updateSession(sessionId, {
+              streamingSegments: [...segments],
+            });
 
             // Update the in-progress debug call with final data
             if (debugEnabled) {
@@ -514,6 +553,7 @@ class SessionStore {
       content: fullContent,
       timestamp: new Date().toISOString(),
       tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+      segments: segments.length > 0 ? segments : undefined,
       plan: finalPlan || undefined,
     };
 
@@ -522,6 +562,7 @@ class SessionStore {
       messages: [...currentMessages, assistantMsg],
       isStreaming: false,
       streamingContent: "",
+      streamingSegments: [],
       thinkingSteps: [],
       currentPlan: null,
     });

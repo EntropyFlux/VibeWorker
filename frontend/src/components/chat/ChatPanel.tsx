@@ -7,7 +7,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
-import { type ToolCall } from "@/lib/api";
+import { type ToolCall, type MessageSegment } from "@/lib/api";
 import { useSessionState, useSessionActions } from "@/lib/sessionStore";
 import type { ThinkingStep } from "@/lib/sessionStore";
 import ApprovalDialog from "./ApprovalDialog";
@@ -216,7 +216,7 @@ export default function ChatPanel({
     onFileOpen,
 }: ChatPanelProps) {
     // Store-driven state
-    const { messages, isStreaming, streamingContent, thinkingSteps, approvalRequest, planApprovalRequest, currentPlan } = useSessionState(sessionId);
+    const { messages, isStreaming, streamingContent, streamingSegments, thinkingSteps, approvalRequest, planApprovalRequest, currentPlan } = useSessionState(sessionId);
     const { sendMessage, stopStream, clearApproval, addSessionAllowedTool, approvePlan } = useSessionActions(sessionId);
 
     // Local UI state
@@ -237,7 +237,7 @@ export default function ChatPanel({
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, [messages, streamingContent]);
+    }, [messages, streamingContent, streamingSegments]);
 
     // Auto-focus input when session changes
     useEffect(() => {
@@ -314,66 +314,131 @@ export default function ChatPanel({
                                 {msg.plan && (
                                     <PlanCard plan={msg.plan} defaultCollapsed />
                                 )}
-                                {/* Tool Calls (Collapsible Thoughts) */}
-                                {msg.tool_calls && msg.tool_calls.length > 0 && (
-                                    <div className="mb-3 space-y-2">
-                                        {msg.tool_calls.map((rawTc, j) => {
-                                            const tc = normalizeToolCall(rawTc);
+                                {/* 按时间顺序渲染 segments（文本和工具调用穿插显示） */}
+                                {msg.segments && msg.segments.length > 0 ? (
+                                    <>
+                                        {msg.segments.map((seg, j) => {
+                                            if (seg.type === "text") {
+                                                return seg.content ? (
+                                                    <div key={j} className="chat-message-content text-sm">
+                                                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownCodeComponents}>
+                                                            {seg.content}
+                                                        </ReactMarkdown>
+                                                    </div>
+                                                ) : null;
+                                            }
+                                            // seg.type === "tool"
+                                            const tc = normalizeToolCall(seg as ToolCall);
+                                            const expandKey = i * 1000 + j;
                                             return (
-                                            <div key={j} className="tool-call-card">
-                                                <div
-                                                    className="tool-call-header"
-                                                    onClick={() => toggleToolExpand(i * 100 + j)}
-                                                >
-                                                    <div className="w-2 h-2 rounded-full bg-green-500" />
-                                                    <span className="text-xs font-medium text-muted-foreground">
-                                                        {getToolDisplay(tc.tool).icon} {getToolDisplay(tc.tool).label}
-                                                    </span>
-                                                    <span className="text-xs text-muted-foreground/60 truncate flex-1 font-mono">
-                                                        {getToolInputSummary(tc.tool, tc.input)}
-                                                    </span>
-                                                    {tc.cached && (
-                                                        <span title="使用缓存" className="inline-flex">
-                                                            <Zap className="w-3 h-3 text-muted-foreground/30" />
-                                                        </span>
-                                                    )}
-                                                    <span className="text-xs text-muted-foreground/40">
-                                                        {expandedTools.has(i * 100 + j) ? "▼" : "▶"}
-                                                    </span>
-                                                </div>
-                                                {expandedTools.has(i * 100 + j) && (
-                                                    <div className="tool-call-body animate-fade-in-up">
-                                                        {tc.input && (
-                                                            <div className="mb-2.5">
-                                                                <div className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-semibold mb-1">输入</div>
-                                                                <ToolInputDisplay toolName={tc.tool} input={tc.input} />
-                                                            </div>
-                                                        )}
-                                                        {tc.output && (
-                                                            <div>
-                                                                <div className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-semibold mb-1">输出</div>
-                                                                <ToolOutputDisplay toolName={tc.tool} output={tc.output} />
+                                                <div key={j} className="my-2">
+                                                    <div className="tool-call-card">
+                                                        <div
+                                                            className="tool-call-header"
+                                                            onClick={() => toggleToolExpand(expandKey)}
+                                                        >
+                                                            <div className="w-2 h-2 rounded-full bg-green-500" />
+                                                            <span className="text-xs font-medium text-muted-foreground">
+                                                                {getToolDisplay(tc.tool).icon} {getToolDisplay(tc.tool).label}
+                                                            </span>
+                                                            <span className="text-xs text-muted-foreground/60 truncate flex-1 font-mono">
+                                                                {getToolInputSummary(tc.tool, tc.input)}
+                                                            </span>
+                                                            {tc.cached && (
+                                                                <span title="使用缓存" className="inline-flex">
+                                                                    <Zap className="w-3 h-3 text-muted-foreground/30" />
+                                                                </span>
+                                                            )}
+                                                            <span className="text-xs text-muted-foreground/40">
+                                                                {expandedTools.has(expandKey) ? "▼" : "▶"}
+                                                            </span>
+                                                        </div>
+                                                        {expandedTools.has(expandKey) && (
+                                                            <div className="tool-call-body animate-fade-in-up">
+                                                                {tc.input && (
+                                                                    <div className="mb-2.5">
+                                                                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-semibold mb-1">输入</div>
+                                                                        <ToolInputDisplay toolName={tc.tool} input={tc.input} />
+                                                                    </div>
+                                                                )}
+                                                                {tc.output && (
+                                                                    <div>
+                                                                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-semibold mb-1">输出</div>
+                                                                        <ToolOutputDisplay toolName={tc.tool} output={tc.output} />
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                         )}
                                                     </div>
-                                                )}
-                                            </div>
+                                                </div>
                                             );
                                         })}
-                                    </div>
+                                    </>
+                                ) : (
+                                    /* 兼容旧格式：没有 segments 时沿用原逻辑 */
+                                    <>
+                                        {msg.tool_calls && msg.tool_calls.length > 0 && (
+                                            <div className="mb-3 space-y-2">
+                                                {msg.tool_calls.map((rawTc, j) => {
+                                                    const tc = normalizeToolCall(rawTc);
+                                                    return (
+                                                    <div key={j} className="tool-call-card">
+                                                        <div
+                                                            className="tool-call-header"
+                                                            onClick={() => toggleToolExpand(i * 100 + j)}
+                                                        >
+                                                            <div className="w-2 h-2 rounded-full bg-green-500" />
+                                                            <span className="text-xs font-medium text-muted-foreground">
+                                                                {getToolDisplay(tc.tool).icon} {getToolDisplay(tc.tool).label}
+                                                            </span>
+                                                            <span className="text-xs text-muted-foreground/60 truncate flex-1 font-mono">
+                                                                {getToolInputSummary(tc.tool, tc.input)}
+                                                            </span>
+                                                            {tc.cached && (
+                                                                <span title="使用缓存" className="inline-flex">
+                                                                    <Zap className="w-3 h-3 text-muted-foreground/30" />
+                                                                </span>
+                                                            )}
+                                                            <span className="text-xs text-muted-foreground/40">
+                                                                {expandedTools.has(i * 100 + j) ? "▼" : "▶"}
+                                                            </span>
+                                                        </div>
+                                                        {expandedTools.has(i * 100 + j) && (
+                                                            <div className="tool-call-body animate-fade-in-up">
+                                                                {tc.input && (
+                                                                    <div className="mb-2.5">
+                                                                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-semibold mb-1">输入</div>
+                                                                        <ToolInputDisplay toolName={tc.tool} input={tc.input} />
+                                                                    </div>
+                                                                )}
+                                                                {tc.output && (
+                                                                    <div>
+                                                                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-semibold mb-1">输出</div>
+                                                                        <ToolOutputDisplay toolName={tc.tool} output={tc.output} />
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                        {msg.content && (
+                                            <div className="chat-message-content text-sm">
+                                                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownCodeComponents}>
+                                                    {msg.content}
+                                                </ReactMarkdown>
+                                            </div>
+                                        )}
+                                    </>
                                 )}
-                                {/* Response Content */}
-                                <div className="chat-message-content text-sm">
-                                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownCodeComponents}>
-                                        {msg.content}
-                                    </ReactMarkdown>
-                                </div>
                             </div>
                         )}
                     </div>
                 ))}
 
-                {/* Streaming response */}
+                {/* Streaming response — 按时间顺序穿插显示文本和工具调用 */}
                 {isStreaming && (
                     <div className="mb-4 animate-fade-in-up">
                         {/* Live Plan Card */}
@@ -385,110 +450,94 @@ export default function ChatPanel({
                               onApprove={approvePlan}
                             />
                         )}
-                        {/* Live thinking steps - grouped by tool */}
-                        {thinkingSteps.length > 0 && (
-                            <div className="mb-3 space-y-2">
-                                {(() => {
-                                    // Group steps into tool calls with input/output
-                                    const toolGroups: { tool: string; input?: string; output?: string; isComplete: boolean; cached?: boolean }[] = [];
-                                    for (const step of thinkingSteps) {
-                                        if (step.type === "tool_start") {
-                                            toolGroups.push({
-                                                tool: step.tool,
-                                                input: step.input,
-                                                isComplete: false,
-                                            });
-                                        } else if (step.type === "tool_end") {
-                                            // Find matching tool_start and add output
-                                            for (let i = toolGroups.length - 1; i >= 0; i--) {
-                                                if (toolGroups[i].tool === step.tool && !toolGroups[i].isComplete) {
-                                                    toolGroups[i].output = step.output;
-                                                    toolGroups[i].isComplete = true;
-                                                    toolGroups[i].cached = step.cached;
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                    }
-                                    return toolGroups.map((tc, j) => (
-                                        <div key={j} className="tool-call-card">
-                                            <div
-                                                className="tool-call-header cursor-pointer"
-                                                onClick={() => toggleStreamingToolExpand(j)}
-                                            >
-                                                <div className={`w-2 h-2 rounded-full ${tc.isComplete ? "bg-green-500" : "bg-amber-500 animate-pulse-soft"}`} />
-                                                <span className="text-xs font-medium text-muted-foreground">
-                                                    {getToolDisplay(tc.tool).icon} {getToolDisplay(tc.tool).label}
-                                                </span>
-                                                <span className="text-xs text-muted-foreground/60 truncate flex-1 font-mono">
-                                                    {getToolInputSummary(tc.tool, tc.input)}
-                                                </span>
-                                                {tc.cached && (
-                                                    <span title="使用缓存" className="inline-flex">
-                                                        <Zap className="w-3 h-3 text-muted-foreground/30" />
-                                                    </span>
+                        {/* 按 segments 时间顺序渲染 */}
+                        {streamingSegments.length > 0 && (
+                            <>
+                                {streamingSegments.map((seg, j) => {
+                                    if (seg.type === "text") {
+                                        return seg.content ? (
+                                            <div key={j} className="chat-message-content text-sm">
+                                                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownCodeComponents}>
+                                                    {seg.content}
+                                                </ReactMarkdown>
+                                                {/* 最后一个文本片段时显示光标 */}
+                                                {j === streamingSegments.length - 1 && (
+                                                    <span className="inline-block w-2 h-4 bg-primary/60 ml-0.5 animate-pulse-soft rounded-sm" />
                                                 )}
-                                                <span className="text-xs text-muted-foreground/40">
-                                                    {expandedStreamingTools.has(j) ? "▼" : "▶"}
-                                                </span>
                                             </div>
-                                            {expandedStreamingTools.has(j) && (
-                                                <div className="tool-call-body animate-fade-in-up">
-                                                    {tc.input && (
-                                                        <div className="mb-2.5">
-                                                            <div className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-semibold mb-1">输入</div>
-                                                            <ToolInputDisplay toolName={tc.tool} input={tc.input} />
-                                                        </div>
+                                        ) : null;
+                                    }
+                                    // seg.type === "tool"
+                                    const isComplete = !!seg.output;
+                                    return (
+                                        <div key={j} className="my-2">
+                                            <div className="tool-call-card">
+                                                <div
+                                                    className="tool-call-header cursor-pointer"
+                                                    onClick={() => toggleStreamingToolExpand(j)}
+                                                >
+                                                    <div className={`w-2 h-2 rounded-full ${isComplete ? "bg-green-500" : "bg-amber-500 animate-pulse-soft"}`} />
+                                                    <span className="text-xs font-medium text-muted-foreground">
+                                                        {getToolDisplay(seg.tool).icon} {getToolDisplay(seg.tool).label}
+                                                    </span>
+                                                    <span className="text-xs text-muted-foreground/60 truncate flex-1 font-mono">
+                                                        {getToolInputSummary(seg.tool, seg.input)}
+                                                    </span>
+                                                    {seg.cached && (
+                                                        <span title="使用缓存" className="inline-flex">
+                                                            <Zap className="w-3 h-3 text-muted-foreground/30" />
+                                                        </span>
                                                     )}
-                                                    {tc.output ? (
-                                                        <div>
-                                                            <div className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-semibold mb-1">输出</div>
-                                                            <ToolOutputDisplay toolName={tc.tool} output={tc.output} />
-                                                        </div>
-                                                    ) : (
-                                                        <div className="flex items-center gap-2 text-xs text-muted-foreground/50">
-                                                            <div className="w-3 h-3 border-2 border-amber-500/30 border-t-amber-500 rounded-full animate-spin" />
-                                                            执行中...
-                                                        </div>
-                                                    )}
+                                                    <span className="text-xs text-muted-foreground/40">
+                                                        {expandedStreamingTools.has(j) ? "▼" : "▶"}
+                                                    </span>
                                                 </div>
-                                            )}
+                                                {expandedStreamingTools.has(j) && (
+                                                    <div className="tool-call-body animate-fade-in-up">
+                                                        {seg.input && (
+                                                            <div className="mb-2.5">
+                                                                <div className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-semibold mb-1">输入</div>
+                                                                <ToolInputDisplay toolName={seg.tool} input={seg.input} />
+                                                            </div>
+                                                        )}
+                                                        {seg.output ? (
+                                                            <div>
+                                                                <div className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-semibold mb-1">输出</div>
+                                                                <ToolOutputDisplay toolName={seg.tool} output={seg.output} />
+                                                            </div>
+                                                        ) : (
+                                                            <div className="flex items-center gap-2 text-xs text-muted-foreground/50">
+                                                                <div className="w-3 h-3 border-2 border-amber-500/30 border-t-amber-500 rounded-full animate-spin" />
+                                                                执行中...
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
-                                    ));
+                                    );
+                                })}
+                                {/* 思考指示器：最后一个 segment 是已完成的工具调用且无后续文本时 */}
+                                {(() => {
+                                    const lastSeg = streamingSegments[streamingSegments.length - 1];
+                                    if (lastSeg && lastSeg.type === "tool" && lastSeg.output) {
+                                        return (
+                                            <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground animate-fade-in-up">
+                                                <div className="flex items-center gap-1">
+                                                    <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse-soft" style={{ animationDelay: "0ms" }} />
+                                                    <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse-soft" style={{ animationDelay: "150ms" }} />
+                                                    <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse-soft" style={{ animationDelay: "300ms" }} />
+                                                </div>
+                                                <span>正在分析结果，思考下一步...</span>
+                                            </div>
+                                        );
+                                    }
+                                    return null;
                                 })()}
-                            </div>
+                            </>
                         )}
-                        {/* Thinking indicator - show when all tools are complete but no content yet */}
-                        {(() => {
-                            const allToolsComplete = thinkingSteps.length > 0 &&
-                                thinkingSteps.filter(s => s.type === "tool_start").length ===
-                                thinkingSteps.filter(s => s.type === "tool_end").length;
-                            const lastStep = thinkingSteps[thinkingSteps.length - 1];
-                            const isThinking = allToolsComplete && !streamingContent;
-
-                            if (isThinking && lastStep?.type === "tool_end") {
-                                return (
-                                    <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground animate-fade-in-up">
-                                        <div className="flex items-center gap-1">
-                                            <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse-soft" style={{ animationDelay: "0ms" }} />
-                                            <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse-soft" style={{ animationDelay: "150ms" }} />
-                                            <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse-soft" style={{ animationDelay: "300ms" }} />
-                                        </div>
-                                        <span>正在分析结果，思考下一步...</span>
-                                    </div>
-                                );
-                            }
-                            return null;
-                        })()}
-                        {streamingContent && (
-                            <div className="chat-message-content text-sm">
-                                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownCodeComponents}>
-                                    {streamingContent}
-                                </ReactMarkdown>
-                                <span className="inline-block w-2 h-4 bg-primary/60 ml-0.5 animate-pulse-soft rounded-sm" />
-                            </div>
-                        )}
-                        {!streamingContent && thinkingSteps.length === 0 && (
+                        {/* 初始等待指示器 */}
+                        {streamingSegments.length === 0 && (
                             <div className="flex items-center gap-2 text-muted-foreground">
                                 <div className="flex items-center gap-1">
                                     <div className="w-2 h-2 rounded-full bg-primary/40 animate-pulse-soft" style={{ animationDelay: "0ms" }} />

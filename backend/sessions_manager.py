@@ -91,7 +91,9 @@ class SessionManager:
             return {"messages": [], "title": None, "plan": None}
 
     def save_message(self, session_id: str, role: str, content: str,
-                     tool_calls: Optional[list] = None, plan: Optional[dict] = None) -> None:
+                     tool_calls: Optional[list] = None,
+                     segments: Optional[list] = None,
+                     plan: Optional[dict] = None) -> None:
         """Append a message to a session."""
         session_data = self.get_session_data(session_id)
         messages = session_data.get("messages", [])
@@ -102,6 +104,8 @@ class SessionManager:
         }
         if tool_calls:
             message["tool_calls"] = tool_calls
+        if segments:
+            message["segments"] = segments
         messages.append(message)
         session_data["messages"] = messages
         # Save plan if provided (from assistant message)

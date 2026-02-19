@@ -211,14 +211,26 @@ async def chat(request: ChatRequest):
 
         full_response = ""
         tool_calls_log = []
+        segments_log_ns: list = []
         async for event in run_agent(request.message, history, ctx):
             event_type = event.get("type", "")
             if event_type == "message":
                 full_response = event.get("content", "")
+                segments_log_ns.append({"type": "text", "content": full_response})
             elif event_type == "token":
-                full_response += event.get("content", "")
+                content_chunk = event.get("content", "")
+                full_response += content_chunk
+                if segments_log_ns and segments_log_ns[-1].get("type") == "text":
+                    segments_log_ns[-1]["content"] += content_chunk
+                else:
+                    segments_log_ns.append({"type": "text", "content": content_chunk})
             elif event_type == "tool_start":
                 tool_calls_log.append({
+                    "tool": event["tool"],
+                    "input": event.get("input", ""),
+                })
+                segments_log_ns.append({
+                    "type": "tool",
                     "tool": event["tool"],
                     "input": event.get("input", ""),
                 })
@@ -230,10 +242,17 @@ async def chat(request: ChatRequest):
                         if is_cached:
                             tc["cached"] = True
                         break
+                for seg in reversed(segments_log_ns):
+                    if seg.get("type") == "tool" and seg.get("tool") == event.get("tool") and "output" not in seg:
+                        seg["output"] = event.get("output", "")
+                        if is_cached:
+                            seg["cached"] = True
+                        break
 
         session_manager.save_message(
             request.session_id, "assistant", full_response,
             tool_calls=tool_calls_log if tool_calls_log else None,
+            segments=segments_log_ns if segments_log_ns else None,
         )
 
         return {
@@ -279,6 +298,8 @@ async def _stream_agent_response(message: str, history: list, session_id: str, d
 
     full_response = ""
     tool_calls_log = []
+    # 按时间顺序积累的消息片段（文本+工具交替），用于前端穿插显示
+    segments_log: list = []
     current_plan = None
 
     # 后台任务：泵送 agent 事件到输出队列
@@ -306,9 +327,21 @@ async def _stream_agent_response(message: str, history: list, session_id: str, d
 
             # 累积数据用于会话持久化
             if event_type == "token":
-                full_response += event.get("content", "")
+                content_chunk = event.get("content", "")
+                full_response += content_chunk
+                # 追加到 segments 的最后一个文本片段
+                if segments_log and segments_log[-1].get("type") == "text":
+                    segments_log[-1]["content"] += content_chunk
+                else:
+                    segments_log.append({"type": "text", "content": content_chunk})
             elif event_type == "tool_start":
                 tool_calls_log.append({
+                    "tool": event["tool"],
+                    "input": event.get("input", ""),
+                })
+                # 在 segments 中插入工具调用片段
+                segments_log.append({
+                    "type": "tool",
                     "tool": event["tool"],
                     "input": event.get("input", ""),
                 })
@@ -319,6 +352,13 @@ async def _stream_agent_response(message: str, history: list, session_id: str, d
                         tc["output"] = event.get("output", "")
                         if is_cached:
                             tc["cached"] = True
+                        break
+                # 更新 segments 中对应工具调用的 output
+                for seg in reversed(segments_log):
+                    if seg.get("type") == "tool" and seg.get("tool") == event.get("tool") and "output" not in seg:
+                        seg["output"] = event.get("output", "")
+                        if is_cached:
+                            seg["cached"] = True
                         break
             elif event_type == "plan_created":
                 if event.get("plan"):
@@ -349,6 +389,7 @@ async def _stream_agent_response(message: str, history: list, session_id: str, d
                     session_manager.save_message(
                         session_id, "assistant", full_response,
                         tool_calls=tool_calls_log if tool_calls_log else None,
+                        segments=segments_log if segments_log else None,
                         plan=current_plan,
                     )
 

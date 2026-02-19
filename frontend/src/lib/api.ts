@@ -8,11 +8,18 @@ const API_BASE = "http://localhost:8088";
 // ============================================
 // Types
 // ============================================
+// 消息片段：文本或工具调用，按时间顺序排列
+export type MessageSegment =
+  | { type: "text"; content: string }
+  | { type: "tool"; tool: string; input: string; output?: string; cached?: boolean };
+
 export interface ChatMessage {
   role: "user" | "assistant" | "tool";
   content: string;
   timestamp?: string;
   tool_calls?: ToolCall[];
+  // 按时间顺序排列的消息片段（文本+工具交替）
+  segments?: MessageSegment[];
   plan?: Plan;
 }
 
