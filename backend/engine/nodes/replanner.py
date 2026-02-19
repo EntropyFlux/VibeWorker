@@ -32,6 +32,8 @@ async def replanner_node(state: AgentState, config: RunnableConfig) -> dict[str,
     2. LLM 结构化输出：continue / revise / finish
     3. revise 时更新 plan_data.steps，发出 plan_revised 事件
     """
+    sid = state.get("session_id", "unknown")
+
     graph_config = config.get("configurable", {}).get("graph_config", {})
     node_config = graph_config.get("graph", {}).get("nodes", {}).get("replanner", {})
     skip_on_success = node_config.get("skip_on_success", True)
@@ -57,7 +59,7 @@ async def replanner_node(state: AgentState, config: RunnableConfig) -> dict[str,
         return {"replan_action": "continue"}
 
     # LLM 评估
-    decision = await _evaluate_replan(plan_title, steps, past_steps, step_index)
+    decision = await _evaluate_replan(plan_title, steps, past_steps, step_index, sid, config=config)
 
     if decision is None:
         return {"replan_action": "continue"}
@@ -130,6 +132,8 @@ async def _evaluate_replan(
     steps: list,
     past_steps: list[tuple[str, str]],
     current_index: int,
+    sid: str = "unknown",
+    config: dict = None,
 ) -> Optional[ReplanDecision]:
     """调用 LLM 进行重规划评估。"""
     remaining_steps = steps[current_index:]
@@ -163,9 +167,9 @@ async def _evaluate_replan(
     try:
         llm = get_llm(streaming=False)
         structured_llm = llm.with_structured_output(ReplanDecision)
-        decision = await structured_llm.ainvoke(replan_prompt)
-        logger.info("[REPLANNER] 决策: %s - %s", decision.action, decision.reason)
+        decision = await structured_llm.ainvoke(replan_prompt, config=config)
+        logger.info("[%s][REPLANNER] 决策: %s - %s", sid, decision.action, decision.reason)
         return decision
     except Exception as e:
-        logger.warning("[REPLANNER] 评估失败，降级为继续执行: %s", e)
+        logger.warning("[%s][REPLANNER] 评估失败，降级为继续执行: %s", sid, e)
         return None

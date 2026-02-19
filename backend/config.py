@@ -72,6 +72,8 @@ class Settings(BaseSettings):
     llm_model: str = Field(default="gpt-4o")
     llm_temperature: float = Field(default=0.7)
     llm_max_tokens: int = Field(default=4096)
+    llm_request_timeout: int = Field(default=120, description="LLM 单次请求超时时间（秒）")
+    tool_execution_timeout: int = Field(default=120, description="工具单次执行超时时间（秒）")
 
     # Embedding Configuration
     embedding_api_key: Optional[str] = Field(default=None)

@@ -3,8 +3,10 @@
 手写 ReAct 循环（不使用 create_react_agent 黑盒），
 支持流式 token、工具调用检测和 plan_create 识别。
 """
+import asyncio
 import json
 import logging
+import time
 from typing import Any
 
 from langchain_core.messages import AIMessage, ToolMessage, SystemMessage
@@ -26,6 +28,9 @@ async def agent_node(state: AgentState, config: RunnableConfig) -> dict[str, Any
 
     使用 ainvoke 而非 astream，流式 token 由 astream_events 在外层捕获。
     """
+    # 从 state 中获取 session_id
+    sid = state.get("session_id", "unknown")
+
     # 从 config 的 configurable 中获取图配置
     graph_config = config.get("configurable", {}).get("graph_config", {})
     node_config = graph_config.get("graph", {}).get("nodes", {}).get("agent", {})
@@ -38,9 +43,15 @@ async def agent_node(state: AgentState, config: RunnableConfig) -> dict[str, Any
     system_prompt = state.get("system_prompt", "")
     messages = list(state["messages"])
 
+    logger.info("[%s] Agent 节点开始, max_iter=%d, tools=%d", sid, max_iterations, len(tools))
+
     # 确保系统提示在消息列表最前面
     if messages and not isinstance(messages[0], SystemMessage):
         messages.insert(0, SystemMessage(content=system_prompt))
+
+    from config import settings as _settings
+    llm_timeout = _settings.llm_request_timeout
+    tool_timeout = _settings.tool_execution_timeout
 
     llm = get_llm(streaming=True)
     llm_with_tools = llm.bind_tools(tools) if tools else llm
@@ -54,13 +65,31 @@ async def agent_node(state: AgentState, config: RunnableConfig) -> dict[str, Any
         iterations += 1
 
         # 调用 LLM（ainvoke，外层 astream_events 会捕获流式 token）
-        response: AIMessage = await llm_with_tools.ainvoke(messages)
+        logger.info("[%s] Agent LLM 调用 #%d, 消息数=%d", sid, iterations, len(messages))
+        t0 = time.time()
+        try:
+            response: AIMessage = await asyncio.wait_for(
+                llm_with_tools.ainvoke(messages, config=config),
+                timeout=llm_timeout,
+            )
+        except asyncio.TimeoutError:
+            elapsed = time.time() - t0
+            logger.error("[%s] Agent LLM 调用 #%d 超时 (%.1fs > %ds)，终止迭代",
+                         sid, iterations, elapsed, llm_timeout)
+            messages.append(AIMessage(content=f"[ERROR] LLM 请求超时 ({llm_timeout}s)，请稍后重试"))
+            agent_outcome = "respond"
+            break
+        elapsed = time.time() - t0
         messages.append(response)
 
         # 无工具调用 → 直接回复
         if not response.tool_calls:
+            logger.info("[%s] Agent LLM 响应: tool_calls=无, 耗时=%.1fs", sid, elapsed)
             agent_outcome = "respond"
             break
+
+        logger.info("[%s] Agent LLM 响应: tool_calls=%s, 耗时=%.1fs", sid,
+                    [tc["name"] for tc in response.tool_calls], elapsed)
 
         # 处理工具调用
         for tool_call in response.tool_calls:
@@ -70,21 +99,29 @@ async def agent_node(state: AgentState, config: RunnableConfig) -> dict[str, Any
 
             if tool_name in tool_map:
                 try:
-                    result = await tool_map[tool_name].ainvoke(tool_args)
+                    result = await asyncio.wait_for(
+                        tool_map[tool_name].ainvoke(tool_args, config=config),
+                        timeout=tool_timeout,
+                    )
                     result_str = str(result)
+                except asyncio.TimeoutError:
+                    result_str = f"[ERROR] 工具 {tool_name} 执行超时 ({tool_timeout}s)"
+                    logger.error("[%s] 工具 %s 执行超时 (%ds)", sid, tool_name, tool_timeout)
                 except Exception as e:
                     result_str = f"[ERROR] 工具执行失败: {e}"
-                    logger.error("工具 %s 执行失败: %s", tool_name, e, exc_info=True)
+                    logger.error("[%s] 工具 %s 执行失败: %s", sid, tool_name, e, exc_info=True)
             else:
                 result_str = f"[ERROR] 未知工具: {tool_name}"
-                logger.warning("Agent 调用了未知工具: %s", tool_name)
+                logger.warning("[%s] Agent 调用了未知工具: %s", sid, tool_name)
 
             messages.append(ToolMessage(content=result_str, tool_call_id=call_id))
+            logger.info("[%s] Agent 工具执行: %s, 成功=%s", sid, tool_name, "[ERROR]" not in result_str)
 
             # 检测 plan_create → 解析计划数据
             if tool_name == "plan_create" and "[ERROR]" not in result_str:
                 plan_data = _parse_plan_from_tool_result(result_str, tool_args)
                 if plan_data:
+                    logger.info("[%s] Agent 检测到 plan_create, plan_id=%s", sid, plan_data.get("plan_id"))
                     agent_outcome = "plan_create"
                     break
 
@@ -93,7 +130,9 @@ async def agent_node(state: AgentState, config: RunnableConfig) -> dict[str, Any
             break
 
     if iterations >= max_iterations:
-        logger.warning("Agent 达到最大迭代次数 (%d)，强制终止", max_iterations)
+        logger.warning("[%s] Agent 达到最大迭代次数 (%d)，强制终止", sid, max_iterations)
+
+    logger.info("[%s] Agent 节点结束: outcome=%s, iterations=%d", sid, agent_outcome, iterations)
 
     result: dict[str, Any] = {
         "messages": messages,

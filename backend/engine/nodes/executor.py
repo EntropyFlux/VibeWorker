@@ -3,7 +3,9 @@
 为当前步骤运行独立 ReAct 循环，使用受限工具集。
 执行器的消息列表与主 messages 分离，仅追加摘要到图状态。
 """
+import asyncio
 import logging
+import time
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -23,6 +25,9 @@ async def executor_node(state: AgentState, config: RunnableConfig) -> dict[str, 
     3. 运行独立 ReAct 循环（与主 messages 分离）
     4. 返回步骤响应 + pending_events（plan_updated）
     """
+    # 从 state 中获取 session_id
+    sid = state.get("session_id", "unknown")
+
     # 从配置获取参数
     graph_config = config.get("configurable", {}).get("graph_config", {})
     node_config = graph_config.get("graph", {}).get("nodes", {}).get("executor", {})
@@ -51,6 +56,8 @@ async def executor_node(state: AgentState, config: RunnableConfig) -> dict[str, 
     step_id = step["id"] if isinstance(step, dict) else step_index + 1
     plan_id = plan_data.get("plan_id", "")
     plan_title = plan_data.get("title", "")
+
+    logger.info("[%s] Executor 开始: step %d/%d - %s", sid, step_index + 1, len(steps), step_title)
 
     pending_events = []
 
@@ -81,6 +88,10 @@ async def executor_node(state: AgentState, config: RunnableConfig) -> dict[str, 
     exec_messages.append(HumanMessage(content=f"执行步骤 {step_index + 1}: {step_title}"))
 
     # 运行 ReAct 循环
+    from config import settings as _settings
+    llm_timeout = _settings.llm_request_timeout
+    tool_timeout = _settings.tool_execution_timeout
+
     llm = get_llm(streaming=True)
     llm_with_tools = llm.bind_tools(tools) if tools else llm
 
@@ -91,8 +102,23 @@ async def executor_node(state: AgentState, config: RunnableConfig) -> dict[str, 
         iterations = 0
         while iterations < max_iterations:
             iterations += 1
+            logger.info("[%s] Executor LLM 调用 #%d", sid, iterations)
 
-            response: AIMessage = await llm_with_tools.ainvoke(exec_messages)
+            t0 = time.time()
+            try:
+                response: AIMessage = await asyncio.wait_for(
+                    llm_with_tools.ainvoke(exec_messages, config=config),
+                    timeout=llm_timeout,
+                )
+            except asyncio.TimeoutError:
+                elapsed = time.time() - t0
+                logger.error("[%s] Executor LLM 调用 #%d 超时 (%.1fs > %ds)，终止步骤执行",
+                             sid, iterations, elapsed, llm_timeout)
+                step_status = "failed"
+                step_response += f"[ERROR] LLM 请求超时 ({llm_timeout}s)"
+                break
+            elapsed = time.time() - t0
+            logger.info("[%s] Executor LLM 调用 #%d 完成, 耗时=%.1fs", sid, iterations, elapsed)
             exec_messages.append(response)
 
             # 收集文本输出
@@ -117,8 +143,14 @@ async def executor_node(state: AgentState, config: RunnableConfig) -> dict[str, 
 
                 if tool_name in tool_map:
                     try:
-                        result = await tool_map[tool_name].ainvoke(tool_args)
+                        result = await asyncio.wait_for(
+                            tool_map[tool_name].ainvoke(tool_args, config=config),
+                            timeout=tool_timeout,
+                        )
                         result_str = str(result)
+                    except asyncio.TimeoutError:
+                        result_str = f"[ERROR] 工具 {tool_name} 执行超时 ({tool_timeout}s)"
+                        logger.error("Executor 工具 %s 执行超时 (%ds)", tool_name, tool_timeout)
                     except Exception as e:
                         result_str = f"[ERROR] 工具执行失败: {e}"
                         logger.error("Executor 工具 %s 执行失败: %s", tool_name, e)
@@ -126,6 +158,7 @@ async def executor_node(state: AgentState, config: RunnableConfig) -> dict[str, 
                     result_str = f"[ERROR] 未知工具: {tool_name}"
 
                 exec_messages.append(ToolMessage(content=result_str, tool_call_id=call_id))
+                logger.info("[%s] Executor 工具: %s, 成功=%s", sid, tool_name, "[ERROR]" not in result_str)
 
         if iterations >= max_iterations:
             logger.warning("Executor 达到最大迭代次数 (%d)", max_iterations)
@@ -134,6 +167,8 @@ async def executor_node(state: AgentState, config: RunnableConfig) -> dict[str, 
         step_status = "failed"
         step_response = f"[ERROR] {e}"
         logger.error("步骤 %d 执行失败: %s", step_index + 1, e, exc_info=True)
+
+    logger.info("[%s] Executor 结束: step_status=%s, iterations=%d", sid, step_status, iterations)
 
     # 标记步骤最终状态
     pending_events.append({

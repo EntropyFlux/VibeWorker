@@ -33,14 +33,27 @@ def _build_or_load_memory_index():
         )
         from llama_index.embeddings.openai import OpenAIEmbedding
 
-        # Configure embedding via model pool
+        # 通过模型池获取 Embedding 配置
         from model_pool import resolve_model
         emb_cfg = resolve_model("embedding")
-        embed_model = OpenAIEmbedding(
-            model=emb_cfg["model"],
-            api_key=emb_cfg["api_key"],
-            api_base=emb_cfg["api_base"],
-        )
+        try:
+            embed_model = OpenAIEmbedding(
+                model=emb_cfg["model"],
+                api_key=emb_cfg["api_key"],
+                api_base=emb_cfg["api_base"],
+            )
+        except (ValueError, Exception) as e:
+            if "is not a valid" in str(e):
+                # 非 OpenAI 标准模型名（如 minimax、dashscope 等 OpenAI 兼容 API），
+                # 先用默认模型创建实例，再绕过 Pydantic 枚举校验强制覆盖模型名
+                logger.info("Embedding 模型 '%s' 非 OpenAI 标准模型，使用兼容模式", emb_cfg["model"])
+                embed_model = OpenAIEmbedding(
+                    api_key=emb_cfg["api_key"],
+                    api_base=emb_cfg["api_base"],
+                )
+                embed_model.__dict__["model"] = emb_cfg["model"]
+            else:
+                raise
         LlamaSettings.embed_model = embed_model
 
         persist_dir = settings.storage_dir / "memory_index"
