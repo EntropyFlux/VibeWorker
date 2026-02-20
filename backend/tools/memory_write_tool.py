@@ -1,7 +1,7 @@
-"""Memory Write Tool - Write memories to memory.json or daily logs.
+"""Memory Write Tool - 写入记忆到 memory.json 或每日日志
 
 记忆系统 v2：
-- 长期记忆存储在 memory.json（替代 MEMORY.md）
+- 长期记忆存储在 memory.json
 - 支持 salience（重要性评分）
 - 支持 procedural 分类（程序性记忆）
 - 支持智能整合（ADD/UPDATE/DELETE/NOOP 决策）

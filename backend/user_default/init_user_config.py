@@ -309,23 +309,8 @@ plan_create(title="分析 SOUL.md 并保存总结", steps=["读取 SOUL.md 文�
 - 遇到错误时，先分析原因再尝试修复
 """
 
-DEFAULT_MEMORY_MD = """\
-# MEMORY - 长期记忆
-
-> 此文件由 VibeWorker Agent 自动维护，用户也可以手动编辑。
-
-## 用户偏好
-_（暂无记录）_
-
-## 重要事实
-_（暂无记录）_
-
-## 任务备忘
-_（暂无记录）_
-
-## 反思日志
-_（暂无记录）_
-"""
+## v1 旧版 MEMORY.md 已废弃，记忆系统 v2 使用 memory.json
+## 详见 backend/memory/ARCHITECTURE.md
 
 DEFAULT_KNOWLEDGE_README = """\
 # 知识库目录 (Knowledge Base)
@@ -405,7 +390,6 @@ _DEFAULT_FILES = [
     ("workspace/IDENTITY.md", DEFAULT_IDENTITY_MD),
     ("workspace/USER.md", DEFAULT_USER_MD),
     ("workspace/AGENTS.md", DEFAULT_AGENTS_MD),
-    ("memory/MEMORY.md", DEFAULT_MEMORY_MD),
     ("knowledge/README.md", DEFAULT_KNOWLEDGE_README),
     ("mcp_servers.json", DEFAULT_MCP_SERVERS),
     ("graph_config.yaml", DEFAULT_GRAPH_CONFIG),

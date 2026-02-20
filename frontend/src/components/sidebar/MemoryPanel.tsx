@@ -72,8 +72,9 @@ const SOURCE_CONFIG: Record<string, { icon: typeof User; label: string; color: s
     migration: { icon: RefreshCw, label: "迁移", color: "text-muted-foreground" },
 };
 
+// 人格文件列表（仅 workspace 目录下的 .md 文件）
+// memory.json 通过"记忆"标签页的 UI 管理，不在此列表中显示
 const WORKSPACE_FILES = [
-    { name: "memory.json", path: "memory/memory.json", icon: "📝" },
     { name: "SOUL.md", path: "workspace/SOUL.md", icon: "💫" },
     { name: "IDENTITY.md", path: "workspace/IDENTITY.md", icon: "🪪" },
     { name: "USER.md", path: "workspace/USER.md", icon: "👤" },

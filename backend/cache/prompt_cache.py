@@ -53,19 +53,19 @@ class PromptCache:
                 settings.workspace_dir / "AGENTS.md",
             ]
 
-            # Also check memory/MEMORY.md if it exists
-            memory_file = settings.memory_dir / "MEMORY.md"
-            if memory_file.exists():
-                workspace_files.append(memory_file)
+            # 监听 memory.json（v2 记忆系统的核心文件）
+            memory_json = settings.memory_dir / "memory.json"
+            if memory_json.exists():
+                workspace_files.append(memory_json)
 
-            # Track daily log files for cache invalidation
+            # 监听每日日志文件（.json 格式）用于缓存失效
             from datetime import datetime, timedelta
             logs_dir = settings.memory_dir / "logs"
             if logs_dir.exists():
                 today = datetime.now()
                 for i in range(settings.memory_daily_log_days):
                     day = (today - timedelta(days=i)).strftime("%Y-%m-%d")
-                    log_file = logs_dir / f"{day}.md"
+                    log_file = logs_dir / f"{day}.json"
                     if log_file.exists():
                         workspace_files.append(log_file)
 

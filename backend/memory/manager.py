@@ -3,12 +3,11 @@
 管理长期记忆（memory.json）和每日日志（logs/YYYY-MM-DD.json）。
 支持结构化条目管理、重要性评分、时间衰减、每日日志操作和统计功能。
 
-主要改进：
-- memory.json 替代 MEMORY.md，结构化存储
+核心能力：
+- memory.json 结构化存储
 - 支持 salience（重要性）、access_count（访问计数）
 - 支持 procedural 分类（程序性记忆）
 - 每日日志使用 JSON 格式
-- 自动迁移旧格式数据
 """
 import json
 import logging
@@ -60,7 +59,6 @@ class MemoryManager:
         self.memory_dir = settings.memory_dir
         self.logs_dir = settings.memory_dir / "logs"
         self.memory_file = settings.memory_dir / "memory.json"
-        self.legacy_memory_file = settings.memory_dir / "MEMORY.md"
         self.backup_file = settings.memory_dir / "memory.json.bak"
 
         # 并发写保护锁（read-modify-write 操作需持有此锁）
@@ -70,173 +68,6 @@ class MemoryManager:
         self.memory_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
 
-        # 自动迁移旧格式
-        self._migrate_if_needed()
-
-    # ============================================
-    # 自动迁移
-    # ============================================
-
-    def _migrate_if_needed(self) -> None:
-        """检查并执行必要的迁移
-
-        迁移场景：
-        1. 存在 MEMORY.md 但不存在 memory.json → 迁移长期记忆
-        2. 存在 .md 日志但不存在 .json 日志 → 迁移每日日志
-        """
-        # 迁移长期记忆
-        if self.legacy_memory_file.exists() and not self.memory_file.exists():
-            self._migrate_memory_md()
-
-        # 迁移每日日志（.md → .json）
-        self._migrate_daily_logs()
-
-    def _migrate_memory_md(self) -> None:
-        """从 MEMORY.md 迁移到 memory.json"""
-        logger.info("开始迁移 MEMORY.md → memory.json")
-
-        try:
-            content = self.legacy_memory_file.read_text(encoding="utf-8")
-            entries = self._parse_legacy_memory(content)
-
-            # 创建新的 memory.json
-            data = {
-                "version": 2,
-                "last_updated": datetime.now().isoformat(),
-                "rolling_summary": "",
-                "memories": [e.to_dict() for e in entries],
-            }
-
-            self._save_memory_json(data)
-            logger.info(f"成功迁移 {len(entries)} 条记忆到 memory.json")
-
-            # 备份旧文件
-            backup_path = self.memory_dir / "MEMORY.md.migrated"
-            shutil.copy2(self.legacy_memory_file, backup_path)
-            logger.info(f"旧文件已备份到 {backup_path}")
-
-        except Exception as e:
-            logger.error(f"迁移 MEMORY.md 失败: {e}")
-
-    def _parse_legacy_memory(self, content: str) -> list[MemoryEntry]:
-        """解析旧版 MEMORY.md 格式
-
-        每条记录为一行列表项：`- [YYYY-MM-DD] content` 或 `- [YYYY-MM-DD][id] content`
-        """
-        entries = []
-        current_category = "general"
-
-        # 分类标题映射
-        category_headers = {
-            "## 用户偏好": "preferences",
-            "## 重要事实": "facts",
-            "## 任务备忘": "tasks",
-            "## 反思日志": "reflections",
-            "## 通用记忆": "general",
-        }
-
-        for line in content.split("\n"):
-            stripped = line.strip()
-
-            # 检测分类标题
-            for header, cat in category_headers.items():
-                if stripped.startswith(header):
-                    current_category = cat
-                    break
-
-            # 解析条目行
-            match = re.match(
-                r"^-\s+\[(\d{4}-\d{2}-\d{2})\](?:\[([a-f0-9]+)\])?\s*(.+)$",
-                stripped,
-            )
-            if match:
-                timestamp = match.group(1)
-                entry_id = match.group(2) or ""
-                entry_content = match.group(3)
-
-                entry = MemoryEntry.from_legacy(
-                    content=entry_content,
-                    category=current_category,
-                    timestamp=timestamp,
-                    entry_id=entry_id,
-                )
-                entries.append(entry)
-
-        return entries
-
-    def _migrate_daily_logs(self) -> None:
-        """迁移 .md 格式的每日日志到 .json 格式"""
-        if not self.logs_dir.exists():
-            return
-
-        for md_file in self.logs_dir.glob("*.md"):
-            # 检查日期格式
-            if not re.match(r"\d{4}-\d{2}-\d{2}", md_file.stem):
-                continue
-
-            json_file = self.logs_dir / f"{md_file.stem}.json"
-            if json_file.exists():
-                continue  # 已迁移
-
-            try:
-                content = md_file.read_text(encoding="utf-8")
-                entries = self._parse_legacy_daily_log(content)
-
-                daily_log = DailyLog(
-                    date=md_file.stem,
-                    entries=entries,
-                    summary=None,
-                    archived=False,
-                )
-
-                json_file.write_text(
-                    json.dumps(daily_log.to_dict(), ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                )
-                logger.info(f"迁移每日日志: {md_file.name} → {json_file.name}")
-
-                # 备份旧文件
-                backup_path = md_file.with_suffix(".md.migrated")
-                md_file.rename(backup_path)
-
-            except Exception as e:
-                logger.warning(f"迁移 {md_file.name} 失败: {e}")
-
-    def _parse_legacy_daily_log(self, content: str) -> list[DailyLogEntry]:
-        """解析旧版每日日志格式
-
-        格式：`- [HH:MM] content` 或 `- [HH:MM] [auto] [category] content`
-        """
-        entries = []
-
-        for line in content.split("\n"):
-            stripped = line.strip()
-
-            # 解析条目行
-            match = re.match(r"^-\s+\[(\d{2}:\d{2})\]\s*(.+)$", stripped)
-            if match:
-                time = match.group(1) + ":00"  # 补全秒数
-                rest = match.group(2)
-
-                # 检查是否为自动提取
-                auto_match = re.match(r"^\[auto\]\s*\[(\w+)\]\s*(.+)$", rest)
-                if auto_match:
-                    category = auto_match.group(1)
-                    entry_content = auto_match.group(2)
-                    entries.append(DailyLogEntry(
-                        time=time,
-                        type="auto_extract",
-                        content=entry_content,
-                        category=category,
-                    ))
-                else:
-                    entries.append(DailyLogEntry(
-                        time=time,
-                        type="event",
-                        content=rest,
-                    ))
-
-        return entries
 
     # ============================================
     # memory.json 操作

@@ -130,34 +130,6 @@ class MemoryEntry:
             context=data.get("context"),
         )
 
-    @classmethod
-    def from_legacy(
-        cls,
-        content: str,
-        category: str,
-        timestamp: str,
-        entry_id: str = "",
-    ) -> "MemoryEntry":
-        """从旧格式（MEMORY.md）创建实例
-
-        Args:
-            content: 记忆内容
-            category: 分类
-            timestamp: 日期（YYYY-MM-DD）
-            entry_id: 可选的旧 ID
-        """
-        # 将日期转换为 ISO 格式
-        created_at = f"{timestamp}T00:00:00"
-        return cls(
-            id=entry_id or cls.generate_id(content, timestamp),
-            category=category,
-            content=content,
-            salience=0.5,
-            created_at=created_at,
-            last_accessed=created_at,
-            access_count=1,
-            source="migration",
-        )
 
 
 @dataclass

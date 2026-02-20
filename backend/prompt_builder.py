@@ -101,7 +101,7 @@ def build_system_prompt() -> str:
     3. IDENTITY.md (自我认知)
     4. USER.md (用户画像)
     5. AGENTS.md (行为准则 & 记忆操作指南)
-    6. MEMORY.md (长期记忆)
+    6. memory.json (长期记忆) + Daily Logs
     """
     # Check cache first
     try:
@@ -167,11 +167,7 @@ def build_system_prompt() -> str:
         if memory_content:
             memory_parts.append(f"<!-- MEMORY -->\n{memory_content}")
     except Exception as e:
-        logger.warning(f"Failed to load memory.json: {e}")
-        # Fallback 到旧的 MEMORY.md
-        memory_content = _read_file_safe(settings.memory_dir / "MEMORY.md", max_chars)
-        if memory_content:
-            memory_parts.append(f"<!-- MEMORY -->\n{memory_content}")
+        logger.warning(f"加载 memory.json 失败: {e}")
 
     # Daily Logs (today + yesterday, truncated if over budget)
     try:
