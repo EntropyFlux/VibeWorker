@@ -77,12 +77,22 @@ async def _cached_run(message, session_history, ctx, mws):
             "content": msg.get("content", "")[:500],
         })
 
+    # 记忆状态指纹：避免记忆变更后仍命中旧缓存（返回基于过时记忆的回复）
+    memory_fingerprint = ""
+    try:
+        mem_file = settings.memory_dir / "memory.json"
+        if mem_file.exists():
+            memory_fingerprint = str(mem_file.stat().st_mtime)
+    except Exception:
+        pass
+
     cache_key_params = {
         "system_prompt": system_prompt,
         "recent_history": recent_history,
         "current_message": message,
         "model": settings.llm_model,
         "temperature": settings.llm_temperature,
+        "memory_fingerprint": memory_fingerprint,
     }
 
     async def generator():

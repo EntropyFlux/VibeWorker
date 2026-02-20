@@ -10,7 +10,8 @@ VibeWorker 是一个轻量级且高度透明的 AI 数字员工 Agent 系统。�
 
 ## 核心特性
 
-- **文件即记忆 (File-first Memory)** — 所有记忆以 Markdown/JSON 文件形式存储，人类可读
+- **文件即记忆 (File-first Memory)** — 所有记忆以 JSON 文件形式存储，人类可读可编辑
+- **记忆系统 v2** — 四层记忆架构 + 智能整合 + 重要性评分 + 时间衰减 + 程序性记忆
 - **技能即插件 (Skills as Plugins)** — 通过文件夹结构管理能力，拖入即用
 - **技能商店 (Skills Store)** — 集成 [skills.sh](https://skills.sh/) 生态，一键浏览、搜索、安装 500+ 社区技能
 - **智能缓存系统** — 双层缓存（内存+磁盘），显著提升响应速度（10-100x），节省 API 成本
@@ -168,6 +169,17 @@ scripts\skills.bat install <name>
 | `/api/store/install` | POST | 安装技能 |
 | `/api/translate` | POST | 翻译内容为中文 |
 
+### 记忆管理接口
+
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/api/memory/entries` | GET/POST/DELETE | 记忆条目管理 |
+| `/api/memory/search` | POST | 搜索记忆（支持时间衰减） |
+| `/api/memory/consolidate` | POST | 智能记忆整合 |
+| `/api/memory/procedural` | GET | 获取程序性记忆 |
+| `/api/memory/archive` | POST | 归档旧日志 |
+| `/api/memory/daily-logs` | GET/DELETE | 每日日志管理 |
+
 ### 缓存管理接口
 
 | 接口 | 方法 | 说明 |
@@ -191,6 +203,13 @@ EMBEDDING_API_KEY=your_api_key
 EMBEDDING_API_BASE=https://api.openai.com/v1
 EMBEDDING_MODEL=text-embedding-3-small
 
+# 记忆系统 v2 配置
+MEMORY_CONSOLIDATION_ENABLED=true     # 智能整合开关
+MEMORY_REFLECTION_ENABLED=true        # 反思记忆开关
+MEMORY_IMPLICIT_RECALL_ENABLED=true   # 隐式召回开关
+MEMORY_ARCHIVE_DAYS=30                # 归档阈值（天）
+MEMORY_DECAY_LAMBDA=0.05              # 衰减系数
+
 # 缓存配置（可选）
 ENABLE_URL_CACHE=true              # URL 缓存（默认开启）
 ENABLE_LLM_CACHE=false             # LLM 缓存（默认关闭）
@@ -202,6 +221,43 @@ LLM_CACHE_TTL=86400                # LLM 缓存时间：24 小时
 PROMPT_CACHE_TTL=600               # Prompt 缓存时间：10 分钟
 TRANSLATE_CACHE_TTL=604800         # 翻译缓存时间：7 天
 ```
+
+## 记忆系统 v2
+
+VibeWorker 采用四层记忆架构，借鉴 Mem0 的智能记忆管理理念：
+
+### 四层架构
+
+| 层级 | 说明 | 存储 |
+|------|------|------|
+| **Working Memory** | 当前对话上下文 | 内存 (messages) |
+| **Short-Term Memory** | 每日日志，30天归档 | `logs/YYYY-MM-DD.json` |
+| **Long-Term Memory** | 持久记忆，智能整合 | `memory.json` |
+| **Procedural Memory** | 工具使用经验 | `memory.json` (procedural) |
+
+### 核心特性
+
+- **智能整合**：ADD/UPDATE/DELETE/NOOP 语义决策，避免重复记忆
+- **重要性评分 (salience)**：0.0-1.0 评分，高重要性记忆优先召回
+- **时间衰减**：指数衰减曲线（14天衰减到50%），新记忆权重更高
+- **隐式召回**：对话开始时自动检索相关记忆注入 System Prompt
+- **程序性记忆**：自动从工具失败中学习，积累使用经验
+- **自动归档**：30天摘要归档，60天清理
+
+### 记忆分类
+
+| 分类 | 用途 | 示例 |
+|------|------|------|
+| `preferences` | 用户偏好 | 喜欢东航、代码风格简洁 |
+| `facts` | 重要事实 | API 地址、项目技术栈 |
+| `tasks` | 任务备忘 | 待办事项、提醒 |
+| `reflections` | 反思总结 | 经验教训 |
+| `procedural` | 程序经验 | 工具使用心得、环境特性 |
+| `general` | 通用信息 | 其他 |
+
+详细文档：`backend/memory/ARCHITECTURE.md`
+
+---
 
 ## 缓存系统
 

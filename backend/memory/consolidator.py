@@ -150,12 +150,14 @@ async def consolidate_memory(
     )
 
     if decision == "ADD":
+        # skip_dedup=True: LLM 已做过 ADD 决策，跳过 Jaccard 重复检测避免矛盾
         entry = memory_manager.add_entry(
             content=content,
             category=category,
             salience=salience,
             source=source,
             context=context,
+            skip_dedup=True,
         )
         logger.info(f"整合决策: ADD - {content[:50]}...")
         return {"decision": "ADD", "entry": entry}
@@ -179,6 +181,7 @@ async def consolidate_memory(
                 salience=salience,
                 source=source,
                 context=context,
+                skip_dedup=True,
             )
             return {"decision": "ADD", "entry": entry}
 
@@ -191,6 +194,7 @@ async def consolidate_memory(
             salience=salience,
             source=source,
             context=context,
+            skip_dedup=True,
         )
         logger.info(f"整合决策: DELETE [{target_id}] + ADD - {content[:50]}...")
         return {"decision": "DELETE", "entry": entry, "deleted_id": target_id}
@@ -202,23 +206,30 @@ async def consolidate_memory(
 
 async def batch_consolidate(
     candidates: list[dict],
+    max_concurrency: int = 3,
 ) -> list[dict]:
-    """批量整合记忆
+    """批量整合记忆（并行执行，限制并发数）
 
     Args:
         candidates: 候选记忆列表，每项包含 {content, category, salience, source, context}
+        max_concurrency: 最大并发数（避免 LLM API 过载）
 
     Returns:
         操作结果列表
     """
-    results = []
-    for candidate in candidates:
-        result = await consolidate_memory(
-            content=candidate.get("content", ""),
-            category=candidate.get("category", "general"),
-            salience=candidate.get("salience", 0.5),
-            source=candidate.get("source", "batch"),
-            context=candidate.get("context"),
-        )
-        results.append(result)
-    return results
+    import asyncio
+
+    semaphore = asyncio.Semaphore(max_concurrency)
+
+    async def _consolidate_one(candidate: dict) -> dict:
+        async with semaphore:
+            return await consolidate_memory(
+                content=candidate.get("content", ""),
+                category=candidate.get("category", "general"),
+                salience=candidate.get("salience", 0.5),
+                source=candidate.get("source", "batch"),
+                context=candidate.get("context"),
+            )
+
+    tasks = [_consolidate_one(c) for c in candidates]
+    return list(await asyncio.gather(*tasks))

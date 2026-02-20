@@ -10,6 +10,13 @@ import {
     FileText,
     X,
     Loader2,
+    RefreshCw,
+    BarChart3,
+    User,
+    Bot,
+    Wrench,
+    Zap,
+    ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -25,7 +32,12 @@ import {
     fetchDailyLogs,
     deleteDailyLog,
     searchMemory,
+    fetchMemoryStats,
+    fetchRollingSummary,
+    reindexMemory,
     type MemoryEntry,
+    type MemoryStats,
+    type MemorySearchResult,
     type DailyLog,
 } from "@/lib/api";
 
@@ -50,6 +62,16 @@ const CATEGORY_LABELS: Record<string, string> = {
     general: "通用",
 };
 
+// 来源标识图标和标签
+const SOURCE_CONFIG: Record<string, { icon: typeof User; label: string; color: string }> = {
+    user_explicit: { icon: User, label: "手动", color: "text-blue-500" },
+    auto_extract: { icon: Bot, label: "提取", color: "text-green-500" },
+    auto_reflection: { icon: Wrench, label: "反思", color: "text-orange-500" },
+    user_correction: { icon: Zap, label: "纠正", color: "text-red-500" },
+    api: { icon: Zap, label: "API", color: "text-purple-500" },
+    migration: { icon: RefreshCw, label: "迁移", color: "text-muted-foreground" },
+};
+
 const WORKSPACE_FILES = [
     { name: "memory.json", path: "memory/memory.json", icon: "📝" },
     { name: "SOUL.md", path: "workspace/SOUL.md", icon: "💫" },
@@ -67,22 +89,55 @@ function formatSize(bytes: number): string {
     return `${(bytes / 1024).toFixed(1)}KB`;
 }
 
+// 重要性的颜色映射
+function salienceColor(salience: number): string {
+    if (salience >= 0.9) return "bg-red-500";
+    if (salience >= 0.8) return "bg-amber-500";
+    if (salience >= 0.5) return "bg-blue-500";
+    return "bg-muted-foreground/30";
+}
+
+function SourceBadge({ source }: { source?: string }) {
+    const config = SOURCE_CONFIG[source || ""] || SOURCE_CONFIG.api;
+    const Icon = config.icon;
+    return (
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <span className={`shrink-0 ${config.color}`}>
+                    <Icon className="w-2.5 h-2.5" />
+                </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-[10px]">
+                来源: {config.label}
+            </TooltipContent>
+        </Tooltip>
+    );
+}
+
 export default function MemoryPanel({ onFileOpen }: MemoryPanelProps) {
     const [activeTab, setActiveTab] = useState<MemoryTab>("entries");
     const [entries, setEntries] = useState<MemoryEntry[]>([]);
     const [dailyLogs, setDailyLogs] = useState<DailyLog[]>([]);
     const [categoryFilter, setCategoryFilter] = useState("");
     const [searchQuery, setSearchQuery] = useState("");
-    const [searchResult, setSearchResult] = useState<string | null>(null);
+    const [searchResults, setSearchResults] = useState<MemorySearchResult[] | null>(null);
     const [isSearching, setIsSearching] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
 
-    // Add entry form
+    // 统计和摘要
+    const [stats, setStats] = useState<MemoryStats | null>(null);
+    const [rollingSummary, setRollingSummary] = useState("");
+    const [showSummary, setShowSummary] = useState(false);
+
+    // 添加表单
     const [showAddForm, setShowAddForm] = useState(false);
     const [newContent, setNewContent] = useState("");
     const [newCategory, setNewCategory] = useState("general");
     const [newSalience, setNewSalience] = useState(0.5);
     const [isAdding, setIsAdding] = useState(false);
+
+    // 操作状态
+    const [isReindexing, setIsReindexing] = useState(false);
 
     const loadEntries = useCallback(async () => {
         setIsLoading(true);
@@ -90,55 +145,51 @@ export default function MemoryPanel({ onFileOpen }: MemoryPanelProps) {
             const data = await fetchMemoryEntries(categoryFilter || undefined);
             setEntries(data.entries);
         } catch {
-            // Backend might not be running
+            // 后端可能未运行
         } finally {
             setIsLoading(false);
         }
     }, [categoryFilter]);
+
+    const loadStats = useCallback(async () => {
+        try {
+            const [s, summary] = await Promise.all([
+                fetchMemoryStats(),
+                fetchRollingSummary(),
+            ]);
+            setStats(s);
+            setRollingSummary(summary);
+        } catch {
+            // 后端可能未运行
+        }
+    }, []);
 
     const loadDailyLogs = useCallback(async () => {
         try {
             const logs = await fetchDailyLogs();
             setDailyLogs(logs);
         } catch {
-            // Backend might not be running
+            // 后端可能未运行
         }
     }, []);
 
-    const handleDeleteDailyLog = async (e: React.MouseEvent, date: string) => {
-        e.stopPropagation();
-        try {
-            await deleteDailyLog(date);
-            await loadDailyLogs();
-        } catch {
-            // Ignore
-        }
-    };
-
     useEffect(() => {
-        if (activeTab === "entries") loadEntries();
+        if (activeTab === "entries") {
+            loadEntries();
+            loadStats();
+        }
         if (activeTab === "logs") loadDailyLogs();
-    }, [activeTab, loadEntries, loadDailyLogs]);
+    }, [activeTab, loadEntries, loadStats, loadDailyLogs]);
 
     const handleSearch = async () => {
         if (!searchQuery.trim()) return;
         setIsSearching(true);
-        setSearchResult(null);
+        setSearchResults(null);
         try {
             const { results } = await searchMemory(searchQuery);
-            if (results.length === 0) {
-                setSearchResult(`未找到与 "${searchQuery}" 相关的记忆。`);
-            } else {
-                // 格式化搜索结果
-                const formatted = results.map((r) => {
-                    const cat = r.category ? `[${CATEGORY_LABELS[r.category] || r.category}]` : "";
-                    const star = (r.salience ?? 0) >= 0.8 ? "⭐ " : "";
-                    return `${star}${cat} ${r.content}`;
-                }).join("\n\n---\n\n");
-                setSearchResult(`找到 ${results.length} 条相关记忆:\n\n${formatted}`);
-            }
+            setSearchResults(results);
         } catch {
-            setSearchResult("搜索失败，请检查后端连接。");
+            setSearchResults([]);
         } finally {
             setIsSearching(false);
         }
@@ -153,6 +204,7 @@ export default function MemoryPanel({ onFileOpen }: MemoryPanelProps) {
             setNewSalience(0.5);
             setShowAddForm(false);
             await loadEntries();
+            await loadStats();
         } catch {
             // Ignore
         } finally {
@@ -165,8 +217,30 @@ export default function MemoryPanel({ onFileOpen }: MemoryPanelProps) {
         try {
             await deleteMemoryEntry(entryId);
             await loadEntries();
+            await loadStats();
         } catch {
             // Ignore
+        }
+    };
+
+    const handleDeleteDailyLog = async (e: React.MouseEvent, date: string) => {
+        e.stopPropagation();
+        try {
+            await deleteDailyLog(date);
+            await loadDailyLogs();
+        } catch {
+            // Ignore
+        }
+    };
+
+    const handleReindex = async () => {
+        setIsReindexing(true);
+        try {
+            await reindexMemory();
+        } catch {
+            // Ignore
+        } finally {
+            setIsReindexing(false);
         }
     };
 
@@ -185,7 +259,7 @@ export default function MemoryPanel({ onFileOpen }: MemoryPanelProps) {
                         key={tab.id}
                         onClick={() => {
                             setActiveTab(tab.id);
-                            setSearchResult(null);
+                            setSearchResults(null);
                         }}
                         className={`flex-1 px-2 py-1.5 text-xs rounded-lg transition-all ${
                             activeTab === tab.id
@@ -217,7 +291,7 @@ export default function MemoryPanel({ onFileOpen }: MemoryPanelProps) {
                             <button
                                 onClick={() => {
                                     setSearchQuery("");
-                                    setSearchResult(null);
+                                    setSearchResults(null);
                                 }}
                                 className="absolute right-2 top-1/2 -translate-y-1/2"
                             >
@@ -235,18 +309,44 @@ export default function MemoryPanel({ onFileOpen }: MemoryPanelProps) {
             )}
 
             {/* Search Results */}
-            {searchResult !== null && (
+            {searchResults !== null && (
                 <div className="px-2 pb-2">
                     <div className="p-2 rounded-lg bg-primary/5 border border-primary/10">
-                        <div className="flex items-center justify-between mb-1">
-                            <span className="text-[10px] font-medium text-primary">搜索结果</span>
-                            <button onClick={() => setSearchResult(null)}>
+                        <div className="flex items-center justify-between mb-1.5">
+                            <span className="text-[10px] font-medium text-primary">
+                                {searchResults.length > 0
+                                    ? `${searchResults.length} 条结果`
+                                    : "无结果"}
+                            </span>
+                            <button onClick={() => setSearchResults(null)}>
                                 <X className="w-3 h-3 text-muted-foreground/50 hover:text-muted-foreground" />
                             </button>
                         </div>
-                        <p className="text-xs text-foreground/80 whitespace-pre-wrap break-words leading-relaxed max-h-40 overflow-y-auto">
-                            {searchResult}
-                        </p>
+                        <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                            {searchResults.length === 0 && (
+                                <p className="text-[10px] text-muted-foreground">
+                                    未找到与 &quot;{searchQuery}&quot; 相关的记忆
+                                </p>
+                            )}
+                            {searchResults.map((r, i) => (
+                                <div key={i} className="p-1.5 rounded-md bg-background/50">
+                                    <div className="flex items-center gap-1.5 mb-0.5">
+                                        {r.category && (
+                                            <span className="text-[9px] px-1 py-px rounded bg-primary/10 text-primary/70">
+                                                {CATEGORY_LABELS[r.category] || r.category}
+                                            </span>
+                                        )}
+                                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${salienceColor(r.salience ?? 0.5)}`} />
+                                        <span className="text-[9px] text-muted-foreground/50 ml-auto">
+                                            {(r.score * 100).toFixed(0)}%
+                                        </span>
+                                    </div>
+                                    <p className="text-[10px] text-foreground/80 leading-relaxed break-words">
+                                        {r.content}
+                                    </p>
+                                </div>
+                            ))}
+                        </div>
                     </div>
                 </div>
             )}
@@ -257,7 +357,26 @@ export default function MemoryPanel({ onFileOpen }: MemoryPanelProps) {
                     {/* Entries Tab */}
                     {activeTab === "entries" && (
                         <>
-                            {/* Category Filter */}
+                            {/* Rolling Summary */}
+                            {rollingSummary && (
+                                <button
+                                    onClick={() => setShowSummary(!showSummary)}
+                                    className="w-full mx-1 mb-1 p-2 rounded-lg bg-accent/30 border border-border/30 text-left transition-all hover:bg-accent/50"
+                                >
+                                    <div className="flex items-center gap-1.5">
+                                        <BarChart3 className="w-3 h-3 text-primary/60 shrink-0" />
+                                        <span className="text-[10px] font-medium text-primary/70">概要</span>
+                                        <ChevronDown className={`w-3 h-3 text-muted-foreground/50 ml-auto transition-transform ${showSummary ? "rotate-180" : ""}`} />
+                                    </div>
+                                    {showSummary && (
+                                        <p className="text-[10px] text-foreground/70 mt-1.5 leading-relaxed break-words">
+                                            {rollingSummary}
+                                        </p>
+                                    )}
+                                </button>
+                            )}
+
+                            {/* Category Filter + Actions */}
                             <div className="flex flex-wrap gap-1 px-1 pb-1.5">
                                 {CATEGORY_OPTIONS.map((opt) => (
                                     <button
@@ -270,19 +389,39 @@ export default function MemoryPanel({ onFileOpen }: MemoryPanelProps) {
                                         }`}
                                     >
                                         {opt.label}
+                                        {/* 分类计数 */}
+                                        {stats && opt.value && stats.category_counts[opt.value] > 0 && (
+                                            <span className="ml-0.5 text-muted-foreground/50">
+                                                {stats.category_counts[opt.value]}
+                                            </span>
+                                        )}
                                     </button>
                                 ))}
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <button
-                                            onClick={() => setShowAddForm(!showAddForm)}
-                                            className="px-1.5 py-0.5 text-[10px] rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition-all"
-                                        >
-                                            <Plus className="w-3 h-3" />
-                                        </button>
-                                    </TooltipTrigger>
-                                    <TooltipContent>添加记忆</TooltipContent>
-                                </Tooltip>
+                                <div className="flex items-center gap-0.5 ml-auto">
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <button
+                                                onClick={handleReindex}
+                                                disabled={isReindexing}
+                                                className="px-1 py-0.5 text-[10px] rounded-full bg-accent/50 text-muted-foreground hover:bg-accent transition-all disabled:opacity-50"
+                                            >
+                                                <RefreshCw className={`w-3 h-3 ${isReindexing ? "animate-spin" : ""}`} />
+                                            </button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>重建索引</TooltipContent>
+                                    </Tooltip>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <button
+                                                onClick={() => setShowAddForm(!showAddForm)}
+                                                className="px-1.5 py-0.5 text-[10px] rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition-all"
+                                            >
+                                                <Plus className="w-3 h-3" />
+                                            </button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>添加记忆</TooltipContent>
+                                    </Tooltip>
+                                </div>
                             </div>
 
                             {/* Add Entry Form */}
@@ -306,8 +445,7 @@ export default function MemoryPanel({ onFileOpen }: MemoryPanelProps) {
                                                 </option>
                                             ))}
                                         </select>
-                                        <div className="flex items-center gap-1">
-                                            <span className="text-[10px] text-muted-foreground whitespace-nowrap">重要性</span>
+                                        <div className="flex items-center gap-1 flex-1">
                                             <input
                                                 type="range"
                                                 min={0}
@@ -315,9 +453,12 @@ export default function MemoryPanel({ onFileOpen }: MemoryPanelProps) {
                                                 step={0.1}
                                                 value={newSalience}
                                                 onChange={(e) => setNewSalience(parseFloat(e.target.value))}
-                                                className="w-14 h-1 accent-primary"
+                                                className="flex-1 h-1 accent-primary"
                                             />
-                                            <span className="text-[10px] text-muted-foreground/70 w-5 text-right">{newSalience.toFixed(1)}</span>
+                                            <span className={`w-2 h-2 rounded-full shrink-0 ${salienceColor(newSalience)}`} />
+                                            <span className="text-[10px] text-muted-foreground/70 w-5 text-right">
+                                                {newSalience.toFixed(1)}
+                                            </span>
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-2">
@@ -365,35 +506,53 @@ export default function MemoryPanel({ onFileOpen }: MemoryPanelProps) {
                                     key={entry.entry_id}
                                     className="px-3 py-2 rounded-xl text-sm hover:bg-accent/50 transition-all group"
                                 >
-                                    <div className="flex items-start gap-2">
-                                        <span className="text-[10px] text-muted-foreground/60 shrink-0 mt-0.5">
-                                            {entry.timestamp}
-                                        </span>
-                                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary/70 shrink-0">
+                                    <div className="flex items-center gap-1.5">
+                                        {/* 来源图标 */}
+                                        <SourceBadge source={entry.source} />
+                                        {/* 重要性圆点 */}
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${salienceColor(entry.salience ?? 0.5)}`} />
+                                            </TooltipTrigger>
+                                            <TooltipContent side="top" className="text-[10px]">
+                                                重要性: {(entry.salience ?? 0.5).toFixed(1)}
+                                            </TooltipContent>
+                                        </Tooltip>
+                                        {/* 分类标签 */}
+                                        <span className="text-[10px] px-1.5 py-px rounded-full bg-primary/10 text-primary/70 shrink-0">
                                             {CATEGORY_LABELS[entry.category] || entry.category}
                                         </span>
-                                        {/* 显示重要性标记 */}
-                                        {(entry.salience ?? 0) >= 0.8 && (
-                                            <span className="text-[10px] text-amber-500 shrink-0" title={`重要性: ${entry.salience?.toFixed(2)}`}>
-                                                ⭐
+                                        {/* 时间戳 */}
+                                        <span className="text-[10px] text-muted-foreground/40 ml-auto shrink-0">
+                                            {entry.timestamp}
+                                        </span>
+                                        {/* 访问次数 */}
+                                        {entry.access_count && entry.access_count > 1 && (
+                                            <span className="text-[9px] text-muted-foreground/30 shrink-0">
+                                                x{entry.access_count}
                                             </span>
                                         )}
+                                        {/* 删除按钮 */}
                                         <Trash2
-                                            className="w-3 h-3 mt-0.5 opacity-0 group-hover:opacity-40 hover:!opacity-100 hover:text-destructive shrink-0 transition-opacity cursor-pointer ml-auto"
+                                            className="w-3 h-3 opacity-0 group-hover:opacity-40 hover:!opacity-100 hover:text-destructive shrink-0 transition-opacity cursor-pointer"
                                             onClick={(e) => handleDeleteEntry(e, entry.entry_id)}
                                         />
                                     </div>
                                     <p className="text-xs text-foreground/80 mt-1 break-words leading-relaxed">
                                         {entry.content}
                                     </p>
-                                    {/* 显示访问次数 */}
-                                    {entry.access_count && entry.access_count > 1 && (
-                                        <span className="text-[9px] text-muted-foreground/40 mt-0.5 block">
-                                            访问 {entry.access_count} 次
-                                        </span>
-                                    )}
                                 </div>
                             ))}
+
+                            {/* Stats Footer */}
+                            {stats && stats.total_entries > 0 && (
+                                <div className="px-2 pt-2 pb-1 border-t border-border/30 mt-2">
+                                    <div className="flex items-center justify-between text-[9px] text-muted-foreground/40">
+                                        <span>{stats.total_entries} 条记忆</span>
+                                        <span>v{stats.version || 2}</span>
+                                    </div>
+                                </div>
+                            )}
                         </>
                     )}
 

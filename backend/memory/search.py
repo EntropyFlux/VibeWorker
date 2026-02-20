@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 # 全局记忆索引（懒加载）
 _memory_index = None
 _memory_query_engine = None
+# 索引脏标记：增删改操作后设为 True，下次构建时清除持久化缓存强制重建
+_index_dirty = False
 
 
 def compute_relevance(
@@ -45,11 +47,13 @@ def compute_relevance(
         decay_lambda = settings.memory_decay_lambda
 
     # 解析 last_accessed 时间
+    # memory.json 中的时间通常由 datetime.now().isoformat() 生成（本地时间、无时区），
+    # 若手动编辑为 UTC（如 "...Z"）则需先转本地时区再去掉 tzinfo 以确保与 now() 一致比较
     try:
         last_accessed = datetime.fromisoformat(memory.last_accessed.replace("Z", "+00:00"))
-        # 如果是 naive datetime，假设为本地时间
         if last_accessed.tzinfo is not None:
-            last_accessed = last_accessed.replace(tzinfo=None)
+            # 先转换为本地时区，再去掉 tzinfo 以与 naive datetime.now() 一致
+            last_accessed = last_accessed.astimezone().replace(tzinfo=None)
     except (ValueError, AttributeError):
         last_accessed = now
 
@@ -66,7 +70,7 @@ def compute_relevance(
 
 def build_or_load_memory_index():
     """构建或加载记忆搜索索引（LlamaIndex）"""
-    global _memory_index, _memory_query_engine
+    global _memory_index, _memory_query_engine, _index_dirty
 
     if not settings.memory_index_enabled:
         return
@@ -104,6 +108,14 @@ def build_or_load_memory_index():
         LlamaSettings.embed_model = embed_model
 
         persist_dir = settings.storage_dir / "memory_index"
+
+        # 索引被标记为脏（有增删改操作），清除持久化缓存强制重建
+        if _index_dirty:
+            if persist_dir.exists():
+                import shutil
+                shutil.rmtree(persist_dir)
+                logger.info("记忆索引已标记为脏，清除持久化缓存")
+            _index_dirty = False
 
         # 尝试加载已有索引
         if persist_dir.exists():
@@ -399,17 +411,21 @@ def get_implicit_recall(
         procedural = memory_manager.get_procedural_memories()
         # 按 salience 排序，取 top 3
         procedural.sort(key=lambda x: x.get("salience", 0), reverse=True)
+
+        # 基于内容前缀去重（日志型结果可能没有 id 字段，字段名也不统一）
+        existing_contents = {r.get("content", "")[:100] for r in results}
         for p in procedural[:3]:
-            # 避免重复
-            if not any(r.get("id") == p.get("entry_id") for r in results):
+            p_content = p.get("content", "")
+            if p_content[:100] not in existing_contents:
                 results.append({
                     "id": p.get("entry_id"),
-                    "content": p.get("content"),
+                    "content": p_content,
                     "category": "procedural",
                     "source": "memory.json",
                     "score": p.get("salience", 0.5),
                     "salience": p.get("salience", 0.5),
                 })
+                existing_contents.add(p_content[:100])
 
     return results[:top_k + 3]  # 允许额外的 procedural
 
@@ -419,7 +435,11 @@ def invalidate_memory_index() -> None:
 
     由 MemoryManager 的增删改操作调用，实现自然节流：
     多次快速写入只会在下一次搜索时触发一次重建。
+
+    关键：同时设置 _index_dirty 标记，使 build_or_load_memory_index
+    清除持久化目录后从头构建，而不是从磁盘加载过时的旧索引。
     """
-    global _memory_index, _memory_query_engine
+    global _memory_index, _memory_query_engine, _index_dirty
     _memory_index = None
     _memory_query_engine = None
+    _index_dirty = True

@@ -19,6 +19,7 @@ from memory.manager import MemoryManager, memory_manager
 from memory.models import (
     MemoryEntry,
     MemoryMeta,
+    DailyLog,
     DailyLogEntry,
     VALID_CATEGORIES,
     CATEGORY_LABELS,
@@ -39,6 +40,7 @@ __all__ = [
     "MemoryManager",
     "MemoryEntry",
     "MemoryMeta",
+    "DailyLog",
     "DailyLogEntry",
     "VALID_CATEGORIES",
     "CATEGORY_LABELS",

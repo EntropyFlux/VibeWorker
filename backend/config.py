@@ -128,6 +128,14 @@ class Settings(BaseSettings):
     memory_daily_log_days: int = Field(default=2)
     memory_max_prompt_tokens: int = Field(default=4000)
     memory_index_enabled: bool = Field(default=True)
+    # Memory v2 Configuration
+    memory_consolidation_enabled: bool = Field(default=True)
+    memory_reflection_enabled: bool = Field(default=True)
+    memory_archive_days: int = Field(default=30)
+    memory_delete_days: int = Field(default=60)
+    memory_decay_lambda: float = Field(default=0.05)
+    memory_implicit_recall_enabled: bool = Field(default=True)
+    memory_implicit_recall_top_k: int = Field(default=3)
 
     # MCP Configuration
     mcp_enabled: bool = Field(default=True)

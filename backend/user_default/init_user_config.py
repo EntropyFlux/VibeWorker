@@ -44,6 +44,15 @@ MEMORY_DAILY_LOG_DAYS=2
 MEMORY_MAX_PROMPT_TOKENS=4000
 MEMORY_INDEX_ENABLED=true
 
+# Memory v2 Configuration
+MEMORY_CONSOLIDATION_ENABLED=true
+MEMORY_REFLECTION_ENABLED=true
+MEMORY_ARCHIVE_DAYS=30
+MEMORY_DELETE_DAYS=60
+MEMORY_DECAY_LAMBDA=0.05
+MEMORY_IMPLICIT_RECALL_ENABLED=true
+MEMORY_IMPLICIT_RECALL_TOP_K=3
+
 # ============================================
 # MCP Configuration
 # ============================================
@@ -177,26 +186,35 @@ description: 技能的中文描述（一句话概括功能）
 
 ## 记忆协议 (MEMORY PROTOCOL)
 
-你拥有两种记忆存储机制和两个专用记忆工具：
+你拥有四层记忆架构和两个专用记忆工具：
 
 ### 记忆工具
 - **`memory_write`**：写入记忆（长期记忆或每日日志）
 - **`memory_search`**：搜索历史记忆
 
-### 长期记忆 (MEMORY.md)
+### 四层记忆架构
+1. **工作记忆** (Working Memory)：当前对话上下文
+2. **短期记忆** (Short-Term)：每日日志，30 天自动归档
+3. **长期记忆** (Long-Term)：memory.json，持久存储
+4. **程序性记忆** (Procedural)：工具使用经验，自动从错误中学习
+
+### 长期记忆 (memory.json)
 存储跨会话的持久信息，按分类组织：
 - **preferences**（用户偏好）：用户习惯、喜好、工作方式
 - **facts**（重要事实）：项目信息、环境配置、关键事实
 - **tasks**（任务备忘）：待办事项、提醒、截止日期
 - **reflections**（反思日志）：经验教训、改进建议
+- **procedural**（程序经验）：工具使用心得、环境特性
 - **general**（通用记忆）：其他值得记住的信息
+
+每条记忆都有**重要性评分** (salience)，高重要性记忆会优先被召回。
 
 ### 每日日志 (Daily Logs)
 存储当天的事件记录和临时信息：
 - 任务执行摘要
 - 临时事项和日程
 - 对话中发现的重要信息
-- 每天一个文件：`memory/logs/YYYY-MM-DD.md`
+- 每天一个文件：`memory/logs/YYYY-MM-DD.json`
 
 ### 何时写入长期记忆
 - 用户明确要求"记住"某件事
@@ -205,7 +223,7 @@ description: 技能的中文描述（一句话概括功能）
 
 使用方式：
 ```
-memory_write(content="推荐航班时优先推荐东方航空", category="preferences", write_to="memory")
+memory_write(content="推荐航班时优先推荐东方航空", category="preferences", write_to="memory", salience=0.8)
 ```
 
 ### 何时写入每日日志
@@ -228,11 +246,17 @@ memory_write(content="完成了项目 API 接口开发", write_to="daily")
 memory_search(query="用户的航班偏好")
 ```
 
+### 重要性评分 (salience)
+- 0.0-0.4：低重要性（临时信息）
+- 0.5-0.7：中等重要性（一般信息）
+- 0.8-1.0：高重要性（关键信息，会优先召回）
+
 ### 重要规则
 - **必须**使用 `memory_write` 工具写入记忆，**禁止**使用 `terminal` 的 `echo >>` 方式
 - **必须**使用 `memory_search` 搜索历史记忆
-- 每次会话开始时，MEMORY.md 和最近的 Daily Log 会自动加载到上下文中
+- 每次会话开始时，相关记忆和程序性经验会自动加载到上下文中
 - 记忆内容要简洁明确，避免冗余
+- 工具执行失败时，系统会自动学习并记录为程序性记忆
 
 ## 工作区协议 (WORKSPACE PROTOCOL)
 

@@ -732,6 +732,22 @@ export async function reindexMemory(): Promise<string> {
   return data.message;
 }
 
+export async function fetchRollingSummary(): Promise<string> {
+  const res = await fetch(`${API_BASE}/api/memory/rolling-summary`);
+  if (!res.ok) throw new Error("Failed to fetch rolling summary");
+  const data = await res.json();
+  return data.summary || "";
+}
+
+export async function fetchProceduralMemories(tool?: string): Promise<MemoryEntry[]> {
+  const params = new URLSearchParams();
+  if (tool) params.set("tool", tool);
+  const res = await fetch(`${API_BASE}/api/memory/procedural?${params}`);
+  if (!res.ok) throw new Error("Failed to fetch procedural memories");
+  const data = await res.json();
+  return data.entries || [];
+}
+
 // ============================================
 // Cache API
 // ============================================

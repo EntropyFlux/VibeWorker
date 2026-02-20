@@ -166,20 +166,22 @@ async def record_tool_failure(
 def _is_similar_experience(existing: str, new: str) -> bool:
     """简单检查两条经验是否相似
 
-    使用关键词重叠度判断，可以替换为更复杂的方法。
+    使用 Jaccard 相似度（与 MemoryManager.DUPLICATE_SIMILARITY_THRESHOLD 保持一致）。
     """
+    from memory.manager import MemoryManager
+
     existing_words = set(existing.lower().split())
     new_words = set(new.lower().split())
 
     if not existing_words or not new_words:
         return False
 
-    # 计算 Jaccard 相似度
+    # 计算 Jaccard 相似度，使用统一阈值
     intersection = len(existing_words & new_words)
     union = len(existing_words | new_words)
     similarity = intersection / union if union > 0 else 0
 
-    return similarity > 0.6  # 60% 相似度阈值
+    return similarity >= MemoryManager.DUPLICATE_SIMILARITY_THRESHOLD
 
 
 def detect_user_correction(

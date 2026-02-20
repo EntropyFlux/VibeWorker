@@ -307,47 +307,81 @@ scripts\skills.bat install <name>
 
 ## 五、VibeWorker 对话记忆管理系统设计
 ### 1. 本地优先原则
-所有记忆文件（Markdown/JSON）均存储在本地文件系统，确保完全的数据主权和可解释性。不使用任何外部数据库（无 SQLite/Redis/向量数据库），搜索索引仅为派生层，可从源文件重建。
+所有记忆文件（JSON）均存储在本地文件系统，确保完全的数据主权和可解释性。不使用任何外部数据库（无 SQLite/Redis/向量数据库），搜索索引仅为派生层，可从源文件重建。
 
-### 2. 记忆架构 ✅ 已实现
+### 2. 记忆系统 v2 架构 ✅ 已实现
 
-参考 OpenClaw 架构，VibeWorker 采用双层记忆系统：
+借鉴 Mem0 的三阶段管道架构，VibeWorker 采用**四层记忆系统**：
 
-#### 2.1 长期记忆 (MEMORY.md)
-+ **路径**：`backend/memory/MEMORY.md`
-+ **性质**：跨会话持久信息，按分类组织
+#### 2.1 四层记忆架构
+
+| 层级 | 说明 | 存储位置 |
+|------|------|---------|
+| **Working Memory** | 当前对话上下文 | 内存 (messages) |
+| **Short-Term Memory** | 每日日志，30天归档 | `memory/logs/YYYY-MM-DD.json` |
+| **Long-Term Memory** | 持久记忆，智能整合 | `memory/memory.json` |
+| **Procedural Memory** | 工具使用经验 | `memory/memory.json` (procedural 分类) |
+
+#### 2.2 长期记忆 (memory.json)
++ **路径**：`~/.vibeworker/memory/memory.json`
++ **格式**：结构化 JSON（替代原 MEMORY.md）
 + **分类**：
     - `preferences`（用户偏好）：用户习惯、喜好、工作方式
     - `facts`（重要事实）：项目信息、环境配置、关键事实
     - `tasks`（任务备忘）：待办事项、提醒、截止日期
     - `reflections`（反思日志）：经验教训、改进建议
+    - `procedural`（程序经验）：**新增** - 工具使用心得、环境特性
     - `general`（通用记忆）：其他值得记住的信息
-+ **条目格式**：`- [YYYY-MM-DD][entry_id] 内容描述`
-+ **写入方式**：Agent 通过 `memory_write` 工具写入，**禁止** `terminal echo >>` 方式
++ **字段**：
+    - `id`: 唯一标识符
+    - `content`: 记忆内容
+    - `category`: 分类
+    - `salience`: 重要性评分 (0.0-1.0)
+    - `created_at`: 创建时间
+    - `last_accessed`: 最后访问时间
+    - `access_count`: 访问次数
+    - `source`: 来源 (user_explicit/auto_extract/auto_reflection)
+    - `context`: 额外上下文（可选）
 
-#### 2.2 每日日志 (Daily Logs)
-+ **路径**：`backend/memory/logs/YYYY-MM-DD.md`
-+ **性质**：短期情景记忆，按天自动分文件
-+ **用途**：任务执行摘要、临时事项、日程计划、对话中发现的重要信息
-+ **条目格式**：`- [HH:MM] 内容描述`
-+ **System Prompt 注入**：自动加载今天+昨天的日志（可配置天数）
+#### 2.3 每日日志 (Daily Logs)
++ **路径**：`~/.vibeworker/memory/logs/YYYY-MM-DD.json`
++ **格式**：结构化 JSON（替代原 .md 格式）
++ **用途**：任务执行摘要、临时事项、自动提取的记忆、工具失败反思
++ **字段**：`time`, `type`, `content`, `category`, `tool`, `error`
++ **归档策略**：30天后自动摘要归档，60天后删除
 
-#### 2.3 记忆搜索
-+ **语义搜索**：基于 LlamaIndex VectorStoreIndex（复用现有 Embedding 配置），索引持久化到 `storage/memory_index/`
-+ **降级方案**：无 Embedding 配置时，自动降级为关键词匹配搜索
-+ **搜索范围**：MEMORY.md + 所有 Daily Logs
+#### 2.4 记忆搜索
++ **向量搜索**：基于 LlamaIndex VectorStoreIndex
++ **关键词搜索**：作为向量搜索的降级方案
++ **综合相关性**：`semantic × salience × decay`
++ **时间衰减**：指数衰减曲线（λ=0.05，14天衰减到50%）
 
-#### 2.4 自动记忆提取（可选，默认关闭）
-+ **触发时机**：每次对话结束后（SSE `done` 事件后）
-+ **工作原理**：取最近 3 轮对话，用 LLM 提取偏好/事实/任务，写入当天 Daily Log 并标记 `[auto]` 前缀
-+ **配置**：`MEMORY_AUTO_EXTRACT=false`（默认关闭，避免额外 LLM 成本）
+#### 2.5 智能整合 (Consolidation)
+当新记忆写入时，系统使用 LLM 决策：
+- **ADD**：新记忆是全新信息
+- **UPDATE**：更新/补充已有记忆
+- **DELETE**：与已有记忆矛盾，删除旧的
+- **NOOP**：已存在或无需记录
 
-#### 2.5 记忆管理器 (MemoryManager)
-核心类 `backend/memory_manager.py`，提供以下能力：
-+ MEMORY.md 结构化解析、条目增删、去重
-+ Daily Log 追加写入、读取、列表
-+ 记忆统计信息
-+ 自动提取 Hook
+#### 2.6 反思记忆 (Procedural Memory)
+自动从工具失败中学习：
+- 工具返回错误时触发分析
+- 提取可复用的经验教训
+- 存储为 `procedural` 分类记忆
+- 在 System Prompt 中自动注入相关工具注意事项
+
+#### 2.7 隐式召回
+对话开始时，基于首条消息自动检索 top-3 相关记忆 + procedural memory 注入到 System Prompt。
+
+#### 2.8 记忆管理模块 (memory/)
+核心模块 `backend/memory/`，提供以下能力：
++ `manager.py`: 核心管理器（CRUD、迁移、统计）
++ `models.py`: 数据模型（MemoryEntry, DailyLog 等）
++ `search.py`: 搜索逻辑（向量 + 关键词 + 衰减）
++ `extractor.py`: 记忆提取器
++ `consolidator.py`: 记忆整合器
++ `reflector.py`: 反思记忆提取
++ `archiver.py`: 日志归档
 
 ### 3. 系统提示词 (System Prompt) 构成
 System Prompt 由以下部分动态拼接而成（按顺序）：
@@ -379,10 +413,20 @@ System Prompt 由以下部分动态拼接而成（按顺序）：
 ### 5. 记忆配置项 ✅ 已实现
 
 ```bash
+# 基础配置（继承自 v1）
 MEMORY_AUTO_EXTRACT=false       # 自动提取记忆（默认关闭）
 MEMORY_DAILY_LOG_DAYS=2         # System Prompt 中加载最近几天的日志
 MEMORY_MAX_PROMPT_TOKENS=4000   # 记忆在 Prompt 中的 Token 上限
 MEMORY_INDEX_ENABLED=true       # 记忆语义搜索索引开关
+
+# 记忆系统 v2 配置
+MEMORY_CONSOLIDATION_ENABLED=true     # 智能整合开关
+MEMORY_REFLECTION_ENABLED=true        # 反思记忆开关
+MEMORY_ARCHIVE_DAYS=30                # 归档阈值（天）
+MEMORY_DELETE_DAYS=60                 # 删除阈值（天）
+MEMORY_DECAY_LAMBDA=0.05              # 衰减系数（14天衰减到50%）
+MEMORY_IMPLICIT_RECALL_ENABLED=true   # 隐式召回开关
+MEMORY_IMPLICIT_RECALL_TOP_K=3        # 隐式召回数量
 ```
 
 ### 6. 会话存储 (Sessions)
@@ -479,27 +523,37 @@ MEMORY_INDEX_ENABLED=true       # 记忆语义搜索索引开关
     - 返回：`{ "status": "ok", "translated": "...", "source_language": "en", "target_language": "zh-CN" }`
     - 说明：使用 LLM 进行智能翻译，仅翻译描述性文本，保留代码块和技术标识符。
 
-### 10. 记忆管理接口 ✅ 已实现
-+ **Endpoint**: `GET /api/memory/entries` - 列出 MEMORY.md 条目。
+### 10. 记忆管理接口 ✅ 已实现（v2 升级）
++ **Endpoint**: `GET /api/memory/entries` - 列出 memory.json 条目。
     - Query 参数：`category`（分类筛选，可选）、`page`（页码）、`page_size`（每页数量）
-    - 返回：条目列表（含 entry_id, content, category, timestamp）、总数、分页信息
+    - 返回：条目列表（含 entry_id, content, category, timestamp, **salience**, **access_count**）、总数、分页信息
 + **Endpoint**: `POST /api/memory/entries` - 添加记忆条目。
-    - Body: `{ "content": "...", "category": "preferences" }`
+    - Body: `{ "content": "...", "category": "preferences", "salience": 0.8 }`
     - 返回：创建的条目详情（含自动生成的 entry_id）
 + **Endpoint**: `DELETE /api/memory/entries/{entry_id}` - 删除单条记忆。
 + **Endpoint**: `GET /api/memory/daily-logs` - 列出所有 Daily Log 文件。
     - 返回：日志列表（含 date, path, size），按日期倒序
 + **Endpoint**: `GET /api/memory/daily-logs/{date}` - 获取指定日期的日志内容。
-    - 返回：`{ "date": "2026-02-15", "content": "..." }`
 + **Endpoint**: `DELETE /api/memory/daily-logs/{date}` - 删除指定日期的日志文件。
-    - 返回：`{ "status": "ok", "deleted": "2026-02-15" }`
-    - 注：与 GET 合并为 `api_route` 实现，避免 Starlette 同路径不同方法的路由冲突
-+ **Endpoint**: `POST /api/memory/search` - 搜索记忆。
-    - Body: `{ "query": "...", "top_k": 5 }`
-    - 返回：搜索结果（语义搜索优先，降级为关键词匹配）
++ **Endpoint**: `POST /api/memory/search` - 搜索记忆（v2 升级）。
+    - Body: `{ "query": "...", "top_k": 5, "use_decay": true, "category": "..." }`
+    - 返回：搜索结果（含 id, content, category, source, **score**, **salience**）
 + **Endpoint**: `GET /api/memory/stats` - 记忆统计信息。
-    - 返回：总条目数、各分类计数、日志文件数、配置状态
+    - 返回：总条目数、各分类计数、日志文件数、**avg_salience**、**version**
 + **Endpoint**: `POST /api/memory/reindex` - 强制重建记忆搜索索引。
+
+#### 记忆系统 v2 新增接口
++ **Endpoint**: `POST /api/memory/consolidate` - 智能记忆整合。
+    - Body: `{ "content": "...", "category": "...", "salience": 0.5 }`
+    - 返回：`{ "decision": "ADD/UPDATE/DELETE/NOOP", "entry": {...} }`
++ **Endpoint**: `POST /api/memory/archive` - 手动触发日志归档。
+    - Query 参数：`archive_days`（归档阈值）、`delete_days`（删除阈值）
+    - 返回：`{ "archived": [...], "deleted": [...], "errors": [...] }`
++ **Endpoint**: `GET /api/memory/procedural` - 获取程序性记忆。
+    - Query 参数：`tool`（按工具名过滤，可选）
+    - 返回：`{ "procedural": [...], "total": n }`
++ **Endpoint**: `GET /api/memory/rolling-summary` - 获取滚动摘要。
++ **Endpoint**: `PUT /api/memory/rolling-summary` - 设置滚动摘要。
 
 ### 11. 缓存管理接口 ✅ 已实现
 + **Endpoint**: `GET /api/cache/stats` - 获取缓存统计信息。
@@ -625,7 +679,16 @@ vibeworker/
 │   ├── model_pool.py           # 模型池管理（CRUD、场景分配、resolve_model）✅
 │   ├── prompt_builder.py       # System Prompt 动态拼接
 │   ├── sessions_manager.py     # 会话管理器
-│   ├── memory_manager.py       # 记忆管理中心（MemoryManager 核心类）✅
+│   ├── memory/                 # 记忆系统 v2 模块 ✅
+│   │   ├── __init__.py         # 模块入口，导出 memory_manager 单例
+│   │   ├── models.py           # 数据模型（MemoryEntry, DailyLog 等）
+│   │   ├── manager.py          # 核心管理器（CRUD、迁移、统计）
+│   │   ├── search.py           # 搜索逻辑（向量 + 关键词 + 衰减）
+│   │   ├── extractor.py        # 记忆提取器
+│   │   ├── consolidator.py     # 记忆整合器（ADD/UPDATE/DELETE/NOOP）
+│   │   ├── reflector.py        # 反思记忆提取
+│   │   ├── archiver.py         # 日志归档
+│   │   └── ARCHITECTURE.md     # 架构文档
 │   ├── session_context.py      # 会话上下文管理（session_id → 临时目录映射）✅
 │   ├── requirements.txt
 │   ├── user_default/           # 首次运行模板，自动复制到 ~/.vibeworker/
@@ -668,9 +731,10 @@ vibeworker/
 │   ├── model_pool.json         # 模型池配置（模型列表+场景分配）✅
 │   ├── mcp_servers.json        # MCP 服务器配置
 │   ├── sessions/               # JSON 会话记录
-│   ├── memory/                 # 记忆存储
-│   │   ├── MEMORY.md           # 长期记忆（按分类组织的结构化条目）
-│   │   └── logs/               # Daily Logs（每日日志，YYYY-MM-DD.md）
+│   ├── memory/                 # 记忆存储 (v2)
+│   │   ├── memory.json         # 长期记忆（结构化 JSON，替代 MEMORY.md）
+│   │   ├── memory.json.bak     # 自动备份
+│   │   └── logs/               # Daily Logs（每日日志，YYYY-MM-DD.json）
 │   ├── skills/                 # Agent Skills（本地已安装技能）
 │   ├── workspace/              # System Prompts (SOUL.md, AGENTS.md, etc.)
 │   ├── tmp/                    # 会话临时工作目录（每个会话独立子目录）✅

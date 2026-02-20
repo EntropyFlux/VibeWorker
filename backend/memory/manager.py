@@ -52,6 +52,10 @@ class MemoryManager:
     # 重复检测的相似度阈值（Jaccard）
     DUPLICATE_SIMILARITY_THRESHOLD = 0.7
 
+    # Prompt 注入时的条目数量限制（避免生成海量文本再截断）
+    PROMPT_MAX_ENTRIES_PER_CATEGORY = 20
+    PROMPT_MAX_TOTAL_ENTRIES = 50
+
     def __init__(self):
         self.memory_dir = settings.memory_dir
         self.logs_dir = settings.memory_dir / "logs"
@@ -303,14 +307,23 @@ class MemoryManager:
         for m in memories:
             by_category.setdefault(m.category, []).append(m)
 
-        # 按重要性排序
+        # 按重要性排序，限制条目数量避免 Prompt 过长
+        total_count = 0
         for cat in VALID_CATEGORIES:
             cat_entries = by_category.get(cat, [])
             if not cat_entries:
                 continue
 
-            # 按 salience 降序排序
+            # 按 salience 降序排序，优先保留高重要性条目
             cat_entries.sort(key=lambda x: x.salience, reverse=True)
+            cat_entries = cat_entries[:self.PROMPT_MAX_ENTRIES_PER_CATEGORY]
+
+            # 检查总量限制
+            remaining = self.PROMPT_MAX_TOTAL_ENTRIES - total_count
+            if remaining <= 0:
+                break
+            cat_entries = cat_entries[:remaining]
+            total_count += len(cat_entries)
 
             label = CATEGORY_LABELS.get(cat, cat)
             lines = [f"## {label}"]
@@ -350,6 +363,7 @@ class MemoryManager:
         salience: float = 0.5,
         source: str = "user_explicit",
         context: Optional[dict] = None,
+        skip_dedup: bool = False,
     ) -> dict:
         """添加新记忆条目
 
@@ -359,6 +373,7 @@ class MemoryManager:
             salience: 重要性评分（0.0-1.0）
             source: 来源（user_explicit/auto_extract/auto_reflection）
             context: 额外上下文
+            skip_dedup: 跳过重复检测（由 consolidator 已做 LLM 决策时使用）
 
         Returns:
             创建的条目（API 格式）
@@ -373,15 +388,18 @@ class MemoryManager:
             data = self._load_memory_json()
             memories = data.get("memories", [])
 
-            # 重复检测：精确匹配 + Jaccard 相似度（轻量级，无 LLM 开销）
             content_stripped = content.strip()
-            for m in memories:
-                existing = m.get("content", "").strip()
-                if existing == content_stripped:
-                    return MemoryEntry.from_dict(m).to_api_dict()
-                if _jaccard_similarity(existing, content_stripped) >= self.DUPLICATE_SIMILARITY_THRESHOLD:
-                    logger.info(f"检测到相似记忆，跳过添加: {content_stripped[:50]}...")
-                    return MemoryEntry.from_dict(m).to_api_dict()
+
+            # 重复检测：精确匹配 + Jaccard 相似度（轻量级，无 LLM 开销）
+            # consolidator 已通过 LLM 做了 ADD 决策时，跳过此检测避免矛盾
+            if not skip_dedup:
+                for m in memories:
+                    existing = m.get("content", "").strip()
+                    if existing == content_stripped:
+                        return MemoryEntry.from_dict(m).to_api_dict()
+                    if _jaccard_similarity(existing, content_stripped) >= self.DUPLICATE_SIMILARITY_THRESHOLD:
+                        logger.info(f"检测到相似记忆，跳过添加: {content_stripped[:50]}...")
+                        return MemoryEntry.from_dict(m).to_api_dict()
 
             # 创建新条目
             entry = MemoryEntry(
@@ -420,6 +438,7 @@ class MemoryManager:
         Returns:
             更新后的条目，或 None（未找到）
         """
+        result = None
         with self._lock:
             data = self._load_memory_json()
             memories = data.get("memories", [])
@@ -437,13 +456,15 @@ class MemoryManager:
                     memories[i] = m
                     data["memories"] = memories
                     self._save_memory_json(data)
+                    result = MemoryEntry.from_dict(m).to_api_dict()
+                    break
 
-                    # 通知搜索模块索引已过期
-                    self._invalidate_search_index()
-                    logger.info(f"已更新记忆条目 [{entry_id}]")
-                    return MemoryEntry.from_dict(m).to_api_dict()
+        # 索引失效通知放在锁外，与 add_entry 保持一致
+        if result is not None:
+            self._invalidate_search_index()
+            logger.info(f"已更新记忆条目 [{entry_id}]")
 
-        return None
+        return result
 
     def delete_entry(self, entry_id: str) -> bool:
         """删除记忆条目
@@ -454,6 +475,7 @@ class MemoryManager:
         Returns:
             是否成功删除
         """
+        deleted = False
         with self._lock:
             data = self._load_memory_json()
             memories = data.get("memories", [])
@@ -464,12 +486,14 @@ class MemoryManager:
             if len(memories) < original_len:
                 data["memories"] = memories
                 self._save_memory_json(data)
-                # 通知搜索模块索引已过期
-                self._invalidate_search_index()
-                logger.info(f"已删除记忆条目 [{entry_id}]")
-                return True
+                deleted = True
 
-        return False
+        # 索引失效通知放在锁外，与 add_entry 保持一致
+        if deleted:
+            self._invalidate_search_index()
+            logger.info(f"已删除记忆条目 [{entry_id}]")
+
+        return deleted
 
     def record_access(self, entry_id: str) -> None:
         """记录条目访问（更新 last_accessed 和 access_count）"""
@@ -528,32 +552,36 @@ class MemoryManager:
         path = self._daily_log_path(day)
         timestamp = datetime.now().strftime("%H:%M:%S")
 
-        # 加载或创建日志
-        if path.exists():
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-                daily_log = DailyLog.from_dict(data)
-            except Exception:
+        # 日志文件的 read-modify-write 需持锁保护，防止并发写入丢失数据
+        # （auto_extract、reflection、用户纠正等多条路径可能同时触发）
+        with self._lock:
+            # 加载或创建日志
+            if path.exists():
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                    daily_log = DailyLog.from_dict(data)
+                except Exception:
+                    daily_log = DailyLog(date=day or datetime.now().strftime("%Y-%m-%d"))
+            else:
                 daily_log = DailyLog(date=day or datetime.now().strftime("%Y-%m-%d"))
-        else:
-            daily_log = DailyLog(date=day or datetime.now().strftime("%Y-%m-%d"))
 
-        # 添加条目
-        entry = DailyLogEntry(
-            time=timestamp,
-            type=log_type,
-            content=content,
-            category=category,
-            tool=tool,
-            error=error,
-        )
-        daily_log.entries.append(entry)
+            # 添加条目
+            entry = DailyLogEntry(
+                time=timestamp,
+                type=log_type,
+                content=content,
+                category=category,
+                tool=tool,
+                error=error,
+            )
+            daily_log.entries.append(entry)
 
-        # 保存
-        path.write_text(
-            json.dumps(daily_log.to_dict(), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+            # 保存
+            path.write_text(
+                json.dumps(daily_log.to_dict(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
         logger.info(f"已追加到每日日志: {path.name}")
 
     def read_daily_log(self, day: Optional[str] = None) -> str:
@@ -822,6 +850,20 @@ class MemoryManager:
                     log_type="auto_extract",
                     category=cat,
                 )
+
+                # 高重要性（>=0.8）的记忆同时写入长期记忆
+                # 避免显式记忆请求（如"记住..."）只停留在日志中等 30 天才归档提升
+                if salience >= 0.8:
+                    try:
+                        self.add_entry(
+                            content=content,
+                            category=cat,
+                            salience=salience,
+                            source="auto_extract",
+                        )
+                    except Exception as e:
+                        logger.warning(f"自动提取写入长期记忆失败: {e}")
+
                 logger.info(f"自动提取: [{cat}] (salience={salience:.1f}) {content[:50]}...")
 
         except Exception as e:

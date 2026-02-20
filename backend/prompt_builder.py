@@ -156,18 +156,26 @@ def build_system_prompt() -> str:
         f"- **项目源码**（只读）: `{PROJECT_ROOT}`"
     )
 
-    # 6. MEMORY.md + Daily Logs (with token budget)
+    # 6. Memory (memory.json) + Daily Logs (with token budget)
     memory_parts = []
     memory_budget = settings.memory_max_prompt_tokens * 4  # ~4 chars per token estimate
 
-    # MEMORY.md has highest priority
-    memory_content = _read_file_safe(settings.memory_dir / "MEMORY.md", max_chars)
-    if memory_content:
-        memory_parts.append(f"<!-- MEMORY -->\n{memory_content}")
+    # 长期记忆（memory.json）
+    try:
+        from memory.manager import memory_manager
+        memory_content = memory_manager.read_memory()
+        if memory_content:
+            memory_parts.append(f"<!-- MEMORY -->\n{memory_content}")
+    except Exception as e:
+        logger.warning(f"Failed to load memory.json: {e}")
+        # Fallback 到旧的 MEMORY.md
+        memory_content = _read_file_safe(settings.memory_dir / "MEMORY.md", max_chars)
+        if memory_content:
+            memory_parts.append(f"<!-- MEMORY -->\n{memory_content}")
 
     # Daily Logs (today + yesterday, truncated if over budget)
     try:
-        from memory_manager import memory_manager
+        from memory.manager import memory_manager
         daily_context = memory_manager.get_daily_context()
         if daily_context:
             memory_parts.append(f"<!-- DAILY_LOGS -->\n{daily_context}")
@@ -193,3 +201,98 @@ def build_system_prompt() -> str:
         logger.warning(f"Failed to cache prompt: {e}")
 
     return full_prompt
+
+
+def build_implicit_recall_context(user_message: str) -> str:
+    """基于用户首条消息构建隐式召回上下文
+
+    在对话开始时自动检索相关记忆 + 程序性记忆，注入到 System Prompt。
+
+    Args:
+        user_message: 用户的首条消息
+
+    Returns:
+        隐式召回的上下文字符串，可追加到 System Prompt
+    """
+    if not user_message or not user_message.strip():
+        return ""
+
+    try:
+        from memory.search import get_implicit_recall
+
+        top_k = settings.memory_implicit_recall_top_k
+        results = get_implicit_recall(
+            query=user_message,
+            top_k=top_k,
+            include_procedural=True,
+        )
+
+        if not results:
+            return ""
+
+        parts = ["<!-- IMPLICIT_RECALL -->\n## 相关记忆（自动召回）\n"]
+
+        # 分离普通记忆和程序性记忆
+        regular = []
+        procedural = []
+        for r in results:
+            if r.get("category") == "procedural":
+                procedural.append(r)
+            else:
+                regular.append(r)
+
+        # 普通记忆
+        if regular:
+            for r in regular[:3]:
+                content = r.get("content", "")[:200]
+                cat = r.get("category", "")
+                salience = r.get("salience", 0.5)
+                star = "⭐ " if salience >= 0.8 else ""
+                parts.append(f"- {star}[{cat}] {content}")
+
+        # 程序性记忆（工具使用注意事项）
+        if procedural:
+            parts.append("\n### 工具使用注意事项（来自历史经验）\n")
+            for r in procedural[:3]:
+                content = r.get("content", "")[:200]
+                parts.append(f"- {content}")
+
+        return "\n".join(parts)
+
+    except Exception as e:
+        logger.warning(f"Failed to build implicit recall context: {e}")
+        return ""
+
+
+def build_procedural_hints() -> str:
+    """构建程序性记忆提示（工具使用注意事项）
+
+    提取高重要性的 procedural 记忆，用于注入 System Prompt。
+
+    Returns:
+        程序性记忆提示字符串
+    """
+    try:
+        from memory.manager import memory_manager
+
+        procedural = memory_manager.get_procedural_memories()
+        if not procedural:
+            return ""
+
+        # 按 salience 排序，取 top 5
+        procedural.sort(key=lambda x: x.get("salience", 0), reverse=True)
+        top_procedural = procedural[:5]
+
+        if not top_procedural:
+            return ""
+
+        parts = ["<!-- PROCEDURAL_HINTS -->\n## 工具使用注意事项\n"]
+        for p in top_procedural:
+            content = p.get("content", "")[:200]
+            parts.append(f"- {content}")
+
+        return "\n".join(parts)
+
+    except Exception as e:
+        logger.warning(f"Failed to build procedural hints: {e}")
+        return ""

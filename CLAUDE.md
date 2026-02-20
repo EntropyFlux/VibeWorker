@@ -49,8 +49,8 @@ cd frontend && npm run build
 | fetch_url | 网页获取 | BeautifulSoup 清洗为 Markdown |
 | read_file | 读取文件 | `root_dir` 限制 |
 | search_knowledge_base | RAG 检索 | LlamaIndex, `knowledge/` → `storage/` |
-| memory_write | 记忆写入 | `write_to="memory"/"daily"` |
-| memory_search | 记忆搜索 | 语义搜索 + 关键词匹配 |
+| memory_write | 记忆写入 | `write_to="memory"/"daily"`, 支持 `salience` |
+| memory_search | 记忆搜索 | 语义搜索 + 关键词 + 时间衰减 |
 
 ### 3. 缓存系统（`backend/cache/`）
 
@@ -132,10 +132,11 @@ mcp_module/
 
 ### 6. System Prompt 拼接（`backend/workspace/`）
 
-拼接顺序：`SKILLS_SNAPSHOT.xml` → `SOUL.md` → `IDENTITY.md` → `USER.md` → `AGENTS.md` → `MEMORY.md` → Daily Logs
+拼接顺序：`SKILLS_SNAPSHOT.xml` → `SOUL.md` → `IDENTITY.md` → `USER.md` → `AGENTS.md` → `memory.json` → Daily Logs → 隐式召回
 
 - 超长截断 + `...[truncated]`
 - 记忆独立 Token 预算（`MEMORY_MAX_PROMPT_TOKENS`, 默认 4000）
+- 隐式召回：对话开始时自动检索相关记忆 + procedural memory
 - `prompt_builder.py` 负责拼接
 
 ### 7. 会话管理
@@ -193,15 +194,19 @@ DELETE /api/skills/{name}                # 删除
 # 知识库
 POST /api/knowledge/rebuild              # 重建索引
 
-# 记忆
-GET    /api/memory/entries               # 列出条目
-POST   /api/memory/entries               # 添加条目
+# 记忆 (v2)
+GET    /api/memory/entries               # 列出条目（含 salience/access_count）
+POST   /api/memory/entries               # 添加条目（支持 salience）
 DELETE /api/memory/entries/{id}          # 删除条目
 GET    /api/memory/daily-logs            # 日志列表
 GET    /api/memory/daily-logs/{date}     # 指定日期日志
-POST   /api/memory/search               # 搜索记忆
+POST   /api/memory/search               # 搜索（支持 use_decay/category）
 GET    /api/memory/stats                 # 统计
 POST   /api/memory/reindex              # 重建索引
+POST   /api/memory/consolidate          # 智能整合（ADD/UPDATE/DELETE/NOOP）
+POST   /api/memory/archive              # 归档旧日志
+GET    /api/memory/procedural           # 程序性记忆
+GET/PUT /api/memory/rolling-summary     # 滚动摘要
 
 # MCP
 GET    /api/mcp/servers                  # 列出 Server 及状态
@@ -280,7 +285,9 @@ frontend/src/
 backend/
 ├── app.py, config.py, model_pool.py, prompt_builder.py, sessions_manager.py, memory_manager.py, plan_approval.py
 ├── requirements.txt, mcp_servers.json
-├── memory/ (logs/, MEMORY.md)
+├── memory/                 # 记忆系统 v2 模块
+│   ├── __init__.py, models.py, manager.py, search.py
+│   ├── extractor.py, consolidator.py, reflector.py, archiver.py
 ├── sessions/               # JSON 会话
 ├── skills/                 # SKILL.md 文件夹
 ├── workspace/              # SOUL.md, IDENTITY.md, USER.md, AGENTS.md
