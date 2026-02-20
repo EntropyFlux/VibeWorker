@@ -69,6 +69,18 @@ class PromptCache:
                     if log_file.exists():
                         workspace_files.append(log_file)
 
+            # 监控 skills 目录变化（新增/删除/修改 skill）
+            skills_dir = settings.skills_dir
+            if skills_dir.exists():
+                # 记录 skills 目录本身的 mtime（新增/删除子目录会改变）
+                files_version[str(skills_dir)] = skills_dir.stat().st_mtime
+                # 记录每个 SKILL.md 文件的 mtime
+                for skill_subdir in skills_dir.iterdir():
+                    if skill_subdir.is_dir():
+                        skill_md = skill_subdir / "SKILL.md"
+                        if skill_md.exists():
+                            workspace_files.append(skill_md)
+
             for file_path in workspace_files:
                 if file_path.exists():
                     files_version[str(file_path)] = file_path.stat().st_mtime

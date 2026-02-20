@@ -54,8 +54,8 @@ def read_file(file_path: str) -> str:
             return f"❌ Error: Access denied. Cannot read files outside the data directory or project: {path}"
 
         # Sensitive file protection (hard-block .env, keys, credentials)
+        # 注意：settings 已在模块顶部导入，这里直接使用
         try:
-            from config import settings
             sensitive_on = settings.security_enabled and settings.security_sensitive_file_protection
         except Exception:
             sensitive_on = True
