@@ -210,6 +210,7 @@ def _build_executor_prompt(
 
     return f"""{system_prompt}
 
+<!-- PLAN -->
 计划标题：{plan_title}
 当前步骤（{step_index + 1}/{total_steps}）：{step_title}
 
