@@ -137,7 +137,7 @@ export default function ApprovalDialog({
 
     return (
         <Dialog open={!!request} onOpenChange={() => {}}>
-            <DialogContent className="sm:max-w-[480px]" onPointerDownOutside={(e) => e.preventDefault()}>
+            <DialogContent className="sm:max-w-[480px]" onPointerDownOutside={(e) => e.preventDefault()} hideClose>
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                         <Shield className="w-4 h-4" />
