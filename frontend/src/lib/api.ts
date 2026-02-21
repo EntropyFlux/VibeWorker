@@ -680,6 +680,68 @@ export async function deleteMemoryEntry(entryId: string): Promise<void> {
   }
 }
 
+// 每日日志结构化条目
+export interface DailyLogEntry {
+  index: number;
+  time: string;
+  type: string;
+  content: string;
+  category?: string;
+}
+
+export async function updateMemoryEntry(
+  entryId: string,
+  data: { content?: string; category?: string; salience?: number }
+): Promise<MemoryEntry> {
+  const res = await fetch(`${API_BASE}/api/memory/entries/${entryId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to update memory entry");
+  }
+  const result = await res.json();
+  return result.entry;
+}
+
+export async function fetchDailyLogEntries(date: string): Promise<DailyLogEntry[]> {
+  const res = await fetch(`${API_BASE}/api/memory/daily-logs/${date}/entries`);
+  if (!res.ok) throw new Error(`Failed to fetch daily log entries for ${date}`);
+  const data = await res.json();
+  return data.entries || [];
+}
+
+export async function updateDailyLogEntry(
+  date: string,
+  index: number,
+  content: string,
+  logType?: string
+): Promise<DailyLogEntry> {
+  const res = await fetch(`${API_BASE}/api/memory/daily-logs/${date}/entries/${index}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content, log_type: logType }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to update daily log entry");
+  }
+  const result = await res.json();
+  return result.entry;
+}
+
+export async function deleteDailyLogEntry(date: string, index: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/memory/daily-logs/${date}/entries/${index}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to delete daily log entry");
+  }
+}
+
 export async function fetchDailyLogs(): Promise<DailyLog[]> {
   const res = await fetch(`${API_BASE}/api/memory/daily-logs`);
   if (!res.ok) throw new Error("Failed to fetch daily logs");
@@ -705,12 +767,13 @@ export async function searchMemory(
   query: string,
   topK: number = 5,
   useDecay: boolean = true,
-  category?: string
+  category?: string,
+  sourceType?: string
 ): Promise<{ results: MemorySearchResult[]; total: number }> {
   const res = await fetch(`${API_BASE}/api/memory/search`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, top_k: topK, use_decay: useDecay, category }),
+    body: JSON.stringify({ query, top_k: topK, use_decay: useDecay, category, source_type: sourceType }),
   });
   if (!res.ok) throw new Error("Memory search failed");
   const data = await res.json();

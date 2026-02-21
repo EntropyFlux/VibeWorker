@@ -15,20 +15,24 @@ import {
 } from "@/components/ui/tooltip";
 import Sidebar from "@/components/sidebar/Sidebar";
 import ChatPanel from "@/components/chat/ChatPanel";
-import InspectorPanel from "@/components/editor/InspectorPanel";
+import InspectorPanel, { type InspectorMode } from "@/components/editor/InspectorPanel";
 import SettingsDialog, { initTheme } from "@/components/settings/SettingsDialog";
-import { checkHealth, generateSessionTitle } from "@/lib/api";
+import { checkHealth, generateSessionTitle, type MemoryEntry, type DailyLogEntry } from "@/lib/api";
 import { sessionStore } from "@/lib/sessionStore";
 
 type ViewMode = "chat" | "memory" | "skills" | "mcp" | "cache";
 
-// Panel width constraints
+// 面板宽度约束
 const LEFT_MIN = 200;
-const LEFT_MAX = 400;
-const LEFT_DEFAULT = 256;
+const LEFT_MAX = 480;
+const LEFT_DEFAULT = 300;
 const RIGHT_MIN = 280;
 const RIGHT_MAX = 600;
 const RIGHT_DEFAULT = 384;
+
+// localStorage 键名
+const STORAGE_KEY_LEFT_WIDTH = "vibeworker_left_width";
+const STORAGE_KEY_RIGHT_WIDTH = "vibeworker_right_width";
 
 export default function HomePage() {
   const [currentView, setCurrentView] = useState<ViewMode>("chat");
@@ -38,6 +42,12 @@ export default function HomePage() {
   const [isBackendOnline, setIsBackendOnline] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
 
+  // 记忆编辑状态
+  const [inspectorMode, setInspectorMode] = useState<InspectorMode>("file");
+  const [inspectorMemoryEntry, setInspectorMemoryEntry] = useState<MemoryEntry | null>(null);
+  const [inspectorDailyLogEntry, setInspectorDailyLogEntry] = useState<{ date: string; entry: DailyLogEntry } | null>(null);
+  const [memoryRefreshKey, setMemoryRefreshKey] = useState(0);
+
   // Resizable panel widths
   const [leftWidth, setLeftWidth] = useState(LEFT_DEFAULT);
   const [rightWidth, setRightWidth] = useState(RIGHT_DEFAULT);
@@ -45,13 +55,24 @@ export default function HomePage() {
   const containerRef = useRef<HTMLDivElement>(null);
   const sidebarRefreshRef = useRef<() => void>(() => {});
 
-  // Initialize theme from localStorage on mount
+  // Initialize theme + panel widths from localStorage on mount
   useEffect(() => {
     initTheme();
     const savedDebug = localStorage.getItem("vibeworker_debug");
     if (savedDebug === "true") {
       setDebugMode(true);
       setShowInspector(true);
+    }
+    // 恢复面板宽度
+    const savedLeft = localStorage.getItem(STORAGE_KEY_LEFT_WIDTH);
+    if (savedLeft) {
+      const v = Number(savedLeft);
+      if (v >= LEFT_MIN && v <= LEFT_MAX) setLeftWidth(v);
+    }
+    const savedRight = localStorage.getItem(STORAGE_KEY_RIGHT_WIDTH);
+    if (savedRight) {
+      const v = Number(savedRight);
+      if (v >= RIGHT_MIN && v <= RIGHT_MAX) setRightWidth(v);
     }
   }, []);
 
@@ -109,12 +130,38 @@ export default function HomePage() {
 
   const handleFileOpen = useCallback((path: string) => {
     setInspectorFile(path);
+    setInspectorMode("file");
+    setInspectorMemoryEntry(null);
+    setInspectorDailyLogEntry(null);
     setShowInspector(true);
   }, []);
 
   const handleInspectorClose = useCallback(() => {
     setShowInspector(false);
     setInspectorFile(null);
+    setInspectorMode("file");
+    setInspectorMemoryEntry(null);
+    setInspectorDailyLogEntry(null);
+  }, []);
+
+  const handleMemoryEntryOpen = useCallback((entry: MemoryEntry) => {
+    setInspectorMode("memory-entry");
+    setInspectorMemoryEntry(entry);
+    setInspectorDailyLogEntry(null);
+    setInspectorFile(null);
+    setShowInspector(true);
+  }, []);
+
+  const handleDailyLogEntryOpen = useCallback((date: string, entry: DailyLogEntry) => {
+    setInspectorMode("daily-log-entry");
+    setInspectorDailyLogEntry({ date, entry });
+    setInspectorMemoryEntry(null);
+    setInspectorFile(null);
+    setShowInspector(true);
+  }, []);
+
+  const handleMemorySaved = useCallback(() => {
+    setMemoryRefreshKey((k) => k + 1);
   }, []);
 
   const handleSessionSelect = useCallback((sessionId: string) => {
@@ -128,6 +175,12 @@ export default function HomePage() {
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
   }, []);
+
+  // 用 ref 追踪最新宽度，mouseUp 闭包中可以访问
+  const leftWidthRef = useRef(leftWidth);
+  const rightWidthRef = useRef(rightWidth);
+  useEffect(() => { leftWidthRef.current = leftWidth; }, [leftWidth]);
+  useEffect(() => { rightWidthRef.current = rightWidth; }, [rightWidth]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -145,6 +198,12 @@ export default function HomePage() {
 
     const handleMouseUp = () => {
       if (draggingRef.current) {
+        // 拖拽结束时持久化宽度到 localStorage
+        if (draggingRef.current === "left") {
+          localStorage.setItem(STORAGE_KEY_LEFT_WIDTH, String(leftWidthRef.current));
+        } else if (draggingRef.current === "right") {
+          localStorage.setItem(STORAGE_KEY_RIGHT_WIDTH, String(rightWidthRef.current));
+        }
         draggingRef.current = null;
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
@@ -250,6 +309,9 @@ export default function HomePage() {
             onRefreshReady={(refreshFn) => {
               sidebarRefreshRef.current = refreshFn;
             }}
+            onMemoryEntryOpen={handleMemoryEntryOpen}
+            onDailyLogEntryOpen={handleDailyLogEntryOpen}
+            memoryRefreshKey={memoryRefreshKey}
           />
         </aside>
 
@@ -284,6 +346,10 @@ export default function HomePage() {
                 onClearFile={() => setInspectorFile(null)}
                 debugMode={activeDebug}
                 sessionId={currentSessionId}
+                mode={inspectorMode}
+                memoryEntry={inspectorMemoryEntry}
+                dailyLogEntry={inspectorDailyLogEntry}
+                onMemorySaved={handleMemorySaved}
               />
             </aside>
           </>

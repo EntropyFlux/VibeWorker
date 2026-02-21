@@ -509,6 +509,123 @@ class MemoryManager:
         logs.sort(key=lambda x: x["date"], reverse=True)
         return logs
 
+    def get_daily_log_entries(self, day: str) -> list[dict]:
+        """获取每日日志的结构化条目列表（含 index 作为 ID）
+
+        Args:
+            day: 日期字符串（YYYY-MM-DD）
+
+        Returns:
+            条目列表，每条包含 index, time, type, content, category
+        """
+        path = self._daily_log_path(day)
+        if not path.exists():
+            return []
+
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            daily_log = DailyLog.from_dict(data)
+        except Exception:
+            return []
+
+        result = []
+        for i, entry in enumerate(daily_log.entries):
+            result.append({
+                "index": i,
+                "time": entry.time,
+                "type": entry.type,
+                "content": entry.content,
+                "category": entry.category,
+            })
+        return result
+
+    def update_daily_log_entry(
+        self, day: str, index: int, content: str, log_type: Optional[str] = None
+    ) -> Optional[dict]:
+        """按索引更新单条每日日志条目
+
+        Args:
+            day: 日期字符串
+            index: 条目索引
+            content: 新内容
+            log_type: 新类型（可选）
+
+        Returns:
+            更新后的条目，或 None（未找到）
+        """
+        path = self._daily_log_path(day)
+        if not path.exists():
+            return None
+
+        with self._lock:
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                daily_log = DailyLog.from_dict(data)
+            except Exception:
+                return None
+
+            if index < 0 or index >= len(daily_log.entries):
+                return None
+
+            daily_log.entries[index].content = content.strip()
+            if log_type is not None:
+                daily_log.entries[index].type = log_type
+
+            path.write_text(
+                json.dumps(daily_log.to_dict(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+        entry = daily_log.entries[index]
+        logger.info(f"已更新每日日志条目: {day} #{index}")
+        return {
+            "index": index,
+            "time": entry.time,
+            "type": entry.type,
+            "content": entry.content,
+            "category": entry.category,
+        }
+
+    def delete_daily_log_entry(self, day: str, index: int) -> bool:
+        """按索引删除单条每日日志条目（空则删文件）
+
+        Args:
+            day: 日期字符串
+            index: 条目索引
+
+        Returns:
+            是否成功删除
+        """
+        path = self._daily_log_path(day)
+        if not path.exists():
+            return False
+
+        with self._lock:
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                daily_log = DailyLog.from_dict(data)
+            except Exception:
+                return False
+
+            if index < 0 or index >= len(daily_log.entries):
+                return False
+
+            daily_log.entries.pop(index)
+
+            # 条目清空则删除整个文件
+            if not daily_log.entries:
+                path.unlink()
+                logger.info(f"已删除空的每日日志文件: {day}")
+                return True
+
+            path.write_text(
+                json.dumps(daily_log.to_dict(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+        logger.info(f"已删除每日日志条目: {day} #{index}")
+        return True
+
     def get_daily_context(self, num_days: Optional[int] = None) -> str:
         """获取近期每日日志，用于注入 System Prompt"""
         if num_days is None:

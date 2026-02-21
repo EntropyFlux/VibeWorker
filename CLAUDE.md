@@ -351,9 +351,9 @@ def get_llm(streaming: bool = True) -> ChatOpenAI:
 
 ## 约束
 
-✅ 用 LangChain 1.x `create_agent` | Skills 含 Frontmatter | 文件存储优先 | `mcp_module/` 避免包名冲突 | 所有注释使用中文
+✅ Skills 含 Frontmatter | 文件存储优先 | `mcp_module/` 避免包名冲突 | 所有注释使用中文 | 所有前端涉及删除的部分需要增加二次确认
 
-❌ 旧版 AgentExecutor | 数据库存 Session/Memory | Skills 无 Frontmatter | Prompt 中写 Python 调用 | 英文注释
+❌ 数据库存 Session/Memory | Skills 无 Frontmatter | Prompt 中写 Python 调用 | 英文注释
 
 ---
 

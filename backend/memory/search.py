@@ -213,6 +213,7 @@ def keyword_search(
     query: str,
     top_k: int = 5,
     use_decay: bool = True,
+    source_type: Optional[str] = None,
 ) -> list[dict]:
     """关键词搜索（当向量索引不可用时的 fallback）
 
@@ -220,6 +221,7 @@ def keyword_search(
         query: 搜索查询
         top_k: 返回数量
         use_decay: 是否使用时间衰减
+        source_type: 来源类型过滤（long_term/daily_log，可选）
 
     Returns:
         搜索结果列表
@@ -231,49 +233,51 @@ def keyword_search(
     keywords = query_lower.split()
     now = datetime.now()
 
-    # 搜索 memory.json
-    data = memory_manager._load_memory_json()
-    memories = [MemoryEntry.from_dict(m) for m in data.get("memories", [])]
+    # 搜索 memory.json（长期记忆）
+    if source_type is None or source_type == "long_term":
+        data = memory_manager._load_memory_json()
+        memories = [MemoryEntry.from_dict(m) for m in data.get("memories", [])]
 
-    for memory in memories:
-        content_lower = memory.content.lower()
-        if any(kw in content_lower for kw in keywords):
-            # 计算关键词匹配得分
-            keyword_score = sum(1 for kw in keywords if kw in content_lower) / len(keywords)
+        for memory in memories:
+            content_lower = memory.content.lower()
+            if any(kw in content_lower for kw in keywords):
+                # 计算关键词匹配得分
+                keyword_score = sum(1 for kw in keywords if kw in content_lower) / len(keywords)
 
-            if use_decay:
-                score = compute_relevance(memory, keyword_score, now)
-            else:
-                score = keyword_score * memory.salience
+                if use_decay:
+                    score = compute_relevance(memory, keyword_score, now)
+                else:
+                    score = keyword_score * memory.salience
 
-            results.append({
-                "id": memory.id,
-                "content": memory.content,
-                "category": memory.category,
-                "source": "memory.json",
-                "score": score,
-                "salience": memory.salience,
-            })
+                results.append({
+                    "id": memory.id,
+                    "content": memory.content,
+                    "category": memory.category,
+                    "source": "memory.json",
+                    "score": score,
+                    "salience": memory.salience,
+                })
 
-    # 搜索每日日志
-    import json
-    logs_dir = settings.memory_dir / "logs"
-    if logs_dir.exists():
-        for log_file in sorted(logs_dir.glob("*.json"), reverse=True):
-            try:
-                log_data = json.loads(log_file.read_text(encoding="utf-8"))
-                for entry in log_data.get("entries", []):
-                    content = entry.get("content", "")
-                    content_lower = content.lower()
-                    if any(kw in content_lower for kw in keywords):
-                        keyword_score = sum(1 for kw in keywords if kw in content_lower) / len(keywords)
-                        results.append({
-                            "content": content,
-                            "source": f"logs/{log_file.name}",
-                            "score": keyword_score * 0.5,  # 日志权重较低
-                        })
-            except Exception:
-                pass
+    # 搜索每日日志（短期记忆）
+    if source_type is None or source_type == "daily_log":
+        import json
+        logs_dir = settings.memory_dir / "logs"
+        if logs_dir.exists():
+            for log_file in sorted(logs_dir.glob("*.json"), reverse=True):
+                try:
+                    log_data = json.loads(log_file.read_text(encoding="utf-8"))
+                    for entry in log_data.get("entries", []):
+                        content = entry.get("content", "")
+                        content_lower = content.lower()
+                        if any(kw in content_lower for kw in keywords):
+                            keyword_score = sum(1 for kw in keywords if kw in content_lower) / len(keywords)
+                            results.append({
+                                "content": content,
+                                "source": f"logs/{log_file.name}",
+                                "score": keyword_score * 0.5,  # 日志权重较低
+                            })
+                except Exception:
+                    pass
 
     # 按得分排序并限制数量
     results.sort(key=lambda x: x["score"], reverse=True)
@@ -285,6 +289,7 @@ def search_memories(
     top_k: int = 5,
     use_decay: bool = True,
     category: Optional[str] = None,
+    source_type: Optional[str] = None,
 ) -> list[dict]:
     """搜索记忆
 
@@ -295,6 +300,7 @@ def search_memories(
         top_k: 返回数量
         use_decay: 是否使用时间衰减
         category: 分类过滤（可选）
+        source_type: 来源类型过滤（long_term/daily_log，可选）
 
     Returns:
         搜索结果列表，每项包含：
@@ -338,6 +344,10 @@ def search_memories(
                         semantic_score = getattr(node, "score", 0.5)
                         salience = metadata.get("salience", 0.5)
 
+                        # 来源类型过滤（long_term / daily_log）
+                        if source_type and metadata.get("type") != source_type:
+                            continue
+
                         # 分类过滤
                         if category and metadata.get("category") != category:
                             continue
@@ -371,7 +381,7 @@ def search_memories(
                 logger.warning(f"向量搜索失败，fallback 到关键词搜索: {e}")
 
     # Fallback 到关键词搜索
-    results = keyword_search(query, top_k, use_decay)
+    results = keyword_search(query, top_k, use_decay, source_type=source_type)
 
     # 分类过滤
     if category:

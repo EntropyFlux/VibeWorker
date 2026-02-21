@@ -963,6 +963,7 @@ class MemorySearchRequest(BaseModel):
     top_k: int = 5
     use_decay: bool = True  # 是否使用时间衰减
     category: Optional[str] = None  # 分类过滤
+    source_type: Optional[str] = None  # 来源类型过滤（long_term/daily_log）
 
 
 @app.get("/api/memory/entries")
@@ -1015,6 +1016,60 @@ async def delete_memory_entry(entry_id: str):
     return {"status": "ok", "deleted": entry_id}
 
 
+class UpdateMemoryEntryRequest(BaseModel):
+    content: Optional[str] = None
+    category: Optional[str] = None
+    salience: Optional[float] = None
+
+
+@app.put("/api/memory/entries/{entry_id}")
+async def update_memory_entry(entry_id: str, request: UpdateMemoryEntryRequest):
+    """更新单条长期记忆条目。"""
+    result = memory_manager.update_entry(
+        entry_id=entry_id,
+        content=request.content,
+        category=request.category,
+        salience=request.salience,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    return {"status": "ok", "entry": result}
+
+
+@app.get("/api/memory/daily-logs/{date}/entries")
+async def list_daily_log_entries(date: str):
+    """获取指定日期的结构化日志条目列表。"""
+    entries = memory_manager.get_daily_log_entries(date)
+    return {"date": date, "entries": entries}
+
+
+class UpdateDailyLogEntryRequest(BaseModel):
+    content: str
+    log_type: Optional[str] = None
+
+
+@app.put("/api/memory/daily-logs/{date}/entries/{index}")
+async def update_daily_log_entry(date: str, index: int, request: UpdateDailyLogEntryRequest):
+    """更新单条每日日志条目。"""
+    if not request.content.strip():
+        raise HTTPException(status_code=400, detail="Content cannot be empty")
+    result = memory_manager.update_daily_log_entry(
+        day=date, index=index, content=request.content, log_type=request.log_type,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    return {"status": "ok", "entry": result}
+
+
+@app.delete("/api/memory/daily-logs/{date}/entries/{index}")
+async def delete_daily_log_entry(date: str, index: int):
+    """删除单条每日日志条目。"""
+    success = memory_manager.delete_daily_log_entry(day=date, index=index)
+    if not success:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    return {"status": "ok", "deleted": {"date": date, "index": index}}
+
+
 @app.get("/api/memory/daily-logs")
 async def list_daily_logs():
     """List all daily log files."""
@@ -1049,6 +1104,7 @@ async def search_memory(request: MemorySearchRequest):
             top_k=request.top_k,
             use_decay=request.use_decay,
             category=request.category,
+            source_type=request.source_type,
         )
         return {
             "query": request.query,

@@ -19,7 +19,7 @@ import {
     TooltipContent,
     TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { fetchSessions, createSession, deleteSession, fetchSkills, deleteSkill, type Session, type Skill } from "@/lib/api";
+import { fetchSessions, createSession, deleteSession, fetchSkills, deleteSkill, type Session, type Skill, type MemoryEntry, type DailyLogEntry } from "@/lib/api";
 import { useIsSessionStreaming, sessionStore } from "@/lib/sessionStore";
 import SkillsStoreDialog from "@/components/store/SkillsStoreDialog";
 import CachePanel from "./CachePanel";
@@ -35,6 +35,9 @@ interface SidebarProps {
     currentView: ViewMode;
     onFileOpen?: (path: string) => void;
     onRefreshReady?: (refreshFn: () => void) => void;
+    onMemoryEntryOpen?: (entry: MemoryEntry) => void;
+    onDailyLogEntryOpen?: (date: string, entry: DailyLogEntry) => void;
+    memoryRefreshKey?: number;
 }
 
 const NAV_ITEMS: { id: ViewMode; icon: React.ElementType; label: string }[] = [
@@ -169,6 +172,9 @@ export default function Sidebar({
     currentView,
     onFileOpen,
     onRefreshReady,
+    onMemoryEntryOpen,
+    onDailyLogEntryOpen,
+    memoryRefreshKey,
 }: SidebarProps) {
     const [sessions, setSessions] = useState<Session[]>([]);
     const [skills, setSkills] = useState<Skill[]>([]);
@@ -367,7 +373,12 @@ export default function Sidebar({
 
                         {/* Memory Panel */}
                         {currentView === "memory" && (
-                            <MemoryPanel onFileOpen={onFileOpen} />
+                            <MemoryPanel
+                                onFileOpen={onFileOpen}
+                                onMemoryEntryOpen={onMemoryEntryOpen}
+                                onDailyLogEntryOpen={onDailyLogEntryOpen}
+                                refreshKey={memoryRefreshKey}
+                            />
                         )}
 
                         {/* Skills List */}

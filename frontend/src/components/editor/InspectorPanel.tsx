@@ -9,8 +9,10 @@ import {
     TooltipContent,
     TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { fetchFile, saveFile, translateContent, fetchSettings } from "@/lib/api";
+import { fetchFile, saveFile, translateContent, fetchSettings, type MemoryEntry as MemoryEntryType, type DailyLogEntry as DailyLogEntryType } from "@/lib/api";
 import DebugPanel from "@/components/debug/DebugPanel";
+import MemoryEntryEditor from "./MemoryEntryEditor";
+import DailyLogEntryEditor from "./DailyLogEntryEditor";
 
 // Lazy-load Monaco to avoid SSR issues
 const MonacoEditor = dynamic(
@@ -18,12 +20,18 @@ const MonacoEditor = dynamic(
     { ssr: false }
 );
 
+export type InspectorMode = "file" | "memory-entry" | "daily-log-entry";
+
 interface InspectorPanelProps {
     filePath: string | null;
     onClose: () => void;
     onClearFile?: () => void;
     debugMode?: boolean;
     sessionId?: string;
+    mode?: InspectorMode;
+    memoryEntry?: MemoryEntryType | null;
+    dailyLogEntry?: { date: string; entry: DailyLogEntryType } | null;
+    onMemorySaved?: () => void;
 }
 
 export default function InspectorPanel({
@@ -32,6 +40,10 @@ export default function InspectorPanel({
     onClearFile,
     debugMode = false,
     sessionId,
+    mode = "file",
+    memoryEntry,
+    dailyLogEntry,
+    onMemorySaved,
 }: InspectorPanelProps) {
     const [content, setContent] = useState("");
     const [originalContent, setOriginalContent] = useState("");
@@ -138,6 +150,29 @@ export default function InspectorPanel({
         if (path.endsWith(".yaml") || path.endsWith(".yml")) return "yaml";
         return "plaintext";
     };
+
+    // 长期记忆编辑模式
+    if (mode === "memory-entry" && memoryEntry) {
+        return (
+            <MemoryEntryEditor
+                entry={memoryEntry}
+                onSaved={onMemorySaved}
+                onClose={onClose}
+            />
+        );
+    }
+
+    // 日志条目编辑模式
+    if (mode === "daily-log-entry" && dailyLogEntry) {
+        return (
+            <DailyLogEntryEditor
+                date={dailyLogEntry.date}
+                entry={dailyLogEntry.entry}
+                onSaved={onMemorySaved}
+                onClose={onClose}
+            />
+        );
+    }
 
     if (!filePath) {
         if (debugMode && sessionId) {
