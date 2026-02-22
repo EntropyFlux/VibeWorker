@@ -159,6 +159,8 @@ async def _run_uncached(message, session_history, ctx, mws):
     # 不含 procedural（程序经验已在 read_memory 中输出），避免重复
     if _settings.memory_implicit_recall_enabled:
         recall_mode = getattr(_settings, "memory_implicit_recall_mode", "keyword")
+        mode_labels = {"keyword": "关键词", "embedding": "向量"}
+        mode_label = mode_labels.get(recall_mode, recall_mode)
         yield events.build_phase("memory_recall", "正在召回相关记忆...")
         await asyncio.sleep(0)
         try:
