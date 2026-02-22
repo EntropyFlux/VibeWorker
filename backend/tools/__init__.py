@@ -1,7 +1,8 @@
-"""Core Tools Package - 7 built-in tools + Plan tools for VibeWorker Agent."""
+"""Core Tools Package - 8 built-in tools + Plan tools for VibeWorker Agent."""
 from tools.terminal_tool import create_terminal_tool
 from tools.python_repl_tool import create_python_repl_tool
 from tools.fetch_url_tool import create_fetch_url_tool
+from tools.search_web_tool import create_search_web_tool
 from tools.read_file_tool import create_read_file_tool
 from tools.rag_tool import create_rag_tool
 from tools.memory_write_tool import create_memory_write_tool
@@ -12,6 +13,7 @@ __all__ = [
     "create_terminal_tool",
     "create_python_repl_tool",
     "create_fetch_url_tool",
+    "create_search_web_tool",
     "create_read_file_tool",
     "create_rag_tool",
     "create_memory_write_tool",
@@ -22,11 +24,12 @@ __all__ = [
 
 
 def _get_core_tools() -> list:
-    """Return the 7 core tools (no plan tools, no MCP)."""
+    """Return the 8 core tools (no plan tools, no MCP)."""
     return [
         create_terminal_tool(),
         create_python_repl_tool(),
         create_fetch_url_tool(),
+        create_search_web_tool(),
         create_read_file_tool(),
         create_rag_tool(),
         create_memory_write_tool(),

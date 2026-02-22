@@ -24,6 +24,7 @@ beautifulsoup4>=4.12.0
 html2text>=2024.2.26
 requests>=2.32.0
 httpx>=0.28.0
+ddgs>=7.0.0
 
 # MCP (Model Context Protocol)
 mcp>=1.0.0

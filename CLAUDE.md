@@ -40,13 +40,14 @@ cd frontend && npm run build
 **目录：** `backend/engine/`（Agent 编排引擎，详见 `engine/ARCHITECTURE.md`）
 
 
-### 2. Core Tools（7 个内置工具，`backend/tools/`）
+### 2. Core Tools（8 个内置工具，`backend/tools/`）
 
 | 工具 | 功能 | 要点 |
 |------|------|------|
 | terminal | Shell 命令（受限沙箱） | `root_dir` 限制 + 黑名单拦截 |
 | python_repl | Python 执行 | `langchain_experimental` 包 |
 | fetch_url | 网页获取 | BeautifulSoup 清洗为 Markdown |
+| search_web | 互联网搜索 | DuckDuckGo，免费无需 API Key，支持缓存 |
 | read_file | 读取文件 | `root_dir` 限制 |
 | search_knowledge_base | RAG 检索 | LlamaIndex, `knowledge/` → `storage/` |
 | memory_write | 记忆写入 | `write_to="memory"/"daily"`, 支持 `salience` |
@@ -292,7 +293,7 @@ backend/
 ├── sessions/               # JSON 会话
 ├── skills/                 # SKILL.md 文件夹
 ├── workspace/              # SOUL.md, IDENTITY.md, USER.md, AGENTS.md
-├── tools/                  # 7 个 Core Tools + __init__.py (get_all_tools)
+├── tools/                  # 8 个 Core Tools + __init__.py (get_all_tools)
 ├── mcp_module/             # __init__.py, config.py, manager.py, tool_wrapper.py
 ├── engine/                 # Agent 编排引擎（Phase 1 + Phase 2，详见 engine/ARCHITECTURE.md）
 ├── cache/                  # L1+L2 缓存模块 + tool_cache_decorator.py
