@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Square, Sparkles, Zap, ChevronRight, ChevronDown, ChevronUp } from "lucide-react";
+import { Send, Square, Zap, ChevronRight, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -390,9 +390,7 @@ export default function ChatPanel({
                 )}
                 {messages.length === 0 && !isStreaming && (
                     <div className="flex flex-col items-center justify-center h-full text-center animate-fade-in-up">
-                        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[var(--vw-blue)] to-[var(--vw-blue)]/70 flex items-center justify-center mb-4 shadow-lg">
-                            <Sparkles className="w-8 h-8 text-white" />
-                        </div>
+                        <img src="/logo.png" alt="VibeWorker Logo" className="w-16 h-16 mb-4" />
                         <h2 className="text-xl font-semibold mb-2">VibeWorker</h2>
                         <p className="text-muted-foreground text-sm max-w-md">
                             你的本地 AI 副手，拥有真实记忆和可扩展技能。
