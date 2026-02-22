@@ -88,21 +88,18 @@ export default function HomePage() {
     return () => window.removeEventListener("vibeworker-debug-toggle", handler);
   }, []);
 
-  // Listen for debug activity (tool_start, debug_llm_call) to auto-open inspector
+  // 监听 debug activity（tool_start, debug_llm_call），仅在 debug 开关已开启时自动打开面板
   useEffect(() => {
     const handler = (e: Event) => {
       const { sessionId: eventSessionId } = (e as CustomEvent).detail;
-      // Only react to current session
       if (eventSessionId !== currentSessionId) return;
-      // Auto-enable debug mode and open inspector
-      setDebugMode(true);
+      // 仅在 debug 模式已开启时自动打开面板
+      if (!debugMode) return;
       setShowInspector(true);
-      // Persist debug mode preference
-      localStorage.setItem("vibeworker_debug", "true");
     };
     window.addEventListener("vibeworker-debug-activity", handler);
     return () => window.removeEventListener("vibeworker-debug-activity", handler);
-  }, [currentSessionId]);
+  }, [currentSessionId, debugMode]);
 
   // Health check
   useEffect(() => {
