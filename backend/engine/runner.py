@@ -160,7 +160,6 @@ async def _run_uncached(message, session_history, ctx, mws):
     if _settings.memory_implicit_recall_enabled:
         recall_mode = getattr(_settings, "memory_implicit_recall_mode", "keyword")
         mode_labels = {"keyword": "关键词", "embedding": "向量"}
-        mode_label = mode_labels.get(recall_mode, recall_mode)
         yield events.build_phase("memory_recall", "正在召回相关记忆...")
         await asyncio.sleep(0)
         try:
@@ -170,7 +169,7 @@ async def _run_uncached(message, session_history, ctx, mws):
                 system_prompt += f"\n\n{recall_ctx}"
                 logger.info("[%s] 隐式召回已注入, 长度=%d, 条目=%d", sid, len(recall_ctx), len(recall_items))
             # 发送召回结果到前端 debug 面板（与 memory_recall 合并为同一个卡片）
-            desc = f"已召回 {len(recall_items)} 条相关记忆" if recall_items else f"未找到相关记忆（{mode_label}）"
+            desc = f"已召回 {len(recall_items)} 条相关记忆" if recall_items else f"未找到相关记忆"
             yield events.build_phase("memory_recall_done", desc, items=recall_items, mode=recall_mode)
         except Exception as e:
             logger.warning("[%s] 隐式召回失败（非致命）: %s", sid, e)

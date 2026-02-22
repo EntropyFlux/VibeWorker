@@ -498,7 +498,7 @@ export default function MemoryPanel({
                         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50" />
                         <input
                             type="text"
-                            placeholder="搜索日记..."
+                            placeholder="搜索短期记忆..."
                             value={shortSearchQuery}
                             onChange={(e) => setShortSearchQuery(e.target.value)}
                             onKeyDown={(e) => {
@@ -573,7 +573,7 @@ export default function MemoryPanel({
                         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50" />
                         <input
                             type="text"
-                            placeholder="搜索记忆..."
+                            placeholder="搜索长期记忆..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             onKeyDown={(e) => {

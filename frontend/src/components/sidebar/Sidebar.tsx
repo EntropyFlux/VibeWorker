@@ -41,7 +41,7 @@ interface SidebarProps {
 }
 
 const NAV_ITEMS: { id: ViewMode; icon: React.ElementType; label: string }[] = [
-    { id: "chat", icon: MessageSquare, label: "对话" },
+    { id: "chat", icon: MessageSquare, label: "会话" },
     { id: "memory", icon: Brain, label: "记忆" },
     { id: "skills", icon: Puzzle, label: "技能" },
     { id: "mcp", icon: Plug, label: "MCP" },
