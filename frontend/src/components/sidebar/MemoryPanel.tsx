@@ -58,6 +58,8 @@ import {
 import {
     Dialog,
     DialogContent,
+    DialogTitle,
+    DialogDescription,
 } from "@/components/ui/dialog";
 import AddMemoryDialog from "./AddMemoryDialog";
 
@@ -958,6 +960,8 @@ export default function MemoryPanel({
             {/* 压缩进度弹窗 */}
             <Dialog open={isCompressing}>
                 <DialogContent className="sm:max-w-md [&>button]:hidden">
+                    <DialogTitle className="sr-only">整理记忆中</DialogTitle>
+                    <DialogDescription className="sr-only">正在分析和合并相似记忆</DialogDescription>
                     <div className="flex flex-col items-center py-6 gap-4">
                         <div className="relative">
                             <Sparkles className="w-10 h-10 text-amber-500 animate-pulse" />
@@ -976,6 +980,8 @@ export default function MemoryPanel({
             {/* 压缩完成提示 */}
             <Dialog open={compressResult !== null} onOpenChange={() => setCompressResult(null)}>
                 <DialogContent className="sm:max-w-sm">
+                    <DialogTitle className="sr-only">整理完成</DialogTitle>
+                    <DialogDescription className="sr-only">记忆整理已完成</DialogDescription>
                     <div className="flex flex-col items-center py-4 gap-3">
                         <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
                             <Sparkles className="w-6 h-6 text-green-600" />
