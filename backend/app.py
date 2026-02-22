@@ -2048,8 +2048,12 @@ async def update_model_assignments(request: AssignmentsUpdateRequest):
 
 @app.post("/api/model-pool/{model_id}/test")
 async def test_pool_model(model_id: str):
-    """Test a model from the pool by sending a short prompt."""
-    from langchain_openai import ChatOpenAI
+    """Test a model from the pool by sending a short prompt.
+
+    自动检测模型类型：
+    - embedding 模型（模型名包含 'embedding'）使用 embeddings 接口测试
+    - 其他模型使用 chat 接口测试
+    """
     from model_pool import get_model
 
     model_config = get_model(model_id)
@@ -2063,18 +2067,43 @@ async def test_pool_model(model_id: str):
     if not api_key:
         raise HTTPException(status_code=400, detail="Model has no API key configured")
 
+    # 检测是否为 embedding 模型
+    is_embedding = "embedding" in model_name.lower()
+
     try:
-        llm = ChatOpenAI(
-            api_key=api_key,
-            base_url=api_base,
-            model=model_name,
-            temperature=0,
-            max_tokens=20,
-            timeout=15,
-        )
-        response = await llm.ainvoke("简洁的回答我你是什么模型？")
-        reply = response.content[:100] if response.content else "连接成功（模型无文本回复）"
-        return {"status": "ok", "reply": reply, "model": model_name}
+        if is_embedding:
+            # 使用 OpenAI embeddings 接口测试
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(
+                api_key=api_key,
+                base_url=api_base,
+                timeout=15,
+            )
+            response = await client.embeddings.create(
+                model=model_name,
+                input="测试文本",
+            )
+            # 检查返回的向量维度
+            dim = len(response.data[0].embedding) if response.data else 0
+            return {
+                "status": "ok",
+                "reply": f"Embedding 测试成功，向量维度: {dim}",
+                "model": model_name,
+            }
+        else:
+            # 使用 chat 接口测试
+            from langchain_openai import ChatOpenAI
+            llm = ChatOpenAI(
+                api_key=api_key,
+                base_url=api_base,
+                model=model_name,
+                temperature=0,
+                max_tokens=20,
+                timeout=15,
+            )
+            response = await llm.ainvoke("简洁的回答我你是什么模型？")
+            reply = response.content[:100] if response.content else "连接成功（模型无文本回复）"
+            return {"status": "ok", "reply": reply, "model": model_name}
     except Exception as e:
         error_msg = str(e)
         if len(error_msg) > 200:
