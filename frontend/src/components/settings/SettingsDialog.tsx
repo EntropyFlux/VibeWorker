@@ -814,25 +814,23 @@ export default function SettingsDialog() {
                                 配置记忆系统行为
                             </p>
                             <ToggleField
-                                label="会话反思"
+                                label="会话反省总结"
                                 checked={form.memory_session_reflect_enabled}
                                 onChange={(v) => updateField("memory_session_reflect_enabled", v)}
-                                hint="会话结束后自动提取记忆（1 次 LLM 调用）"
-                            />
-                            <ToggleField
-                                label="语义搜索索引"
-                                checked={form.memory_index_enabled}
-                                onChange={(v) => updateField("memory_index_enabled", v)}
+                                hint="会话结束后会进行反省和总结（产生额外的 LLM 调用）"
                             />
                             <SettingsField
-                                label="日志加载天数"
+                                label="短期记忆天数"
                                 value={String(form.memory_daily_log_days)}
                                 onChange={(v) => updateField("memory_daily_log_days", parseInt(v) || 2)}
                                 type="number"
                                 placeholder="2"
                             />
+                                <p className="text-[10px] text-muted-foreground/60">
+                                    加载最近几天的工作事项概要
+                                </p>
                             <SettingsField
-                                label="记忆 Token 预算"
+                                label="记忆占用最大 Token 量"
                                 value={String(form.memory_max_prompt_tokens)}
                                 onChange={(v) => updateField("memory_max_prompt_tokens", parseInt(v) || 4000)}
                                 type="number"
