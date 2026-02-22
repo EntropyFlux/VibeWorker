@@ -366,6 +366,7 @@ class SessionStore {
           case "tool_end": {
             let output = event.output || "";
             let isCached = event.cached || false;
+            const toolSandbox = event.sandbox as ("local" | "docker") | undefined;
             if (output.startsWith("[CACHE_HIT]")) {
               output = output.substring(11);
               isCached = true;
@@ -393,12 +394,13 @@ class SessionStore {
               }
             }
 
-            // 更新 segments 中对应工具调用的 output
+            // 更新 segments 中对应工具调用的 output 和 sandbox 标记
             for (let si = segments.length - 1; si >= 0; si--) {
               const seg = segments[si];
               if (seg.type === "tool" && seg.tool === (event.tool || "") && !seg.output) {
                 seg.output = output;
                 if (isCached) seg.cached = true;
+                if (toolSandbox) seg.sandbox = toolSandbox;
                 break;
               }
             }

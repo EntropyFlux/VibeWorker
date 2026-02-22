@@ -11,7 +11,7 @@ const API_BASE = "http://localhost:8088";
 // 消息片段：文本或工具调用，按时间顺序排列
 export type MessageSegment =
   | { type: "text"; content: string }
-  | { type: "tool"; tool: string; input: string; output?: string; cached?: boolean };
+  | { type: "tool"; tool: string; input: string; output?: string; cached?: boolean; sandbox?: "local" | "docker" };
 
 export interface ChatMessage {
   role: "user" | "assistant" | "tool";
@@ -150,6 +150,7 @@ export interface SSEEvent {
   cached?: boolean;  // Cache indicator
   duration_ms?: number;  // Tool/LLM duration
   motivation?: string;  // Agent's motivation/explanation
+  sandbox?: "local" | "docker";  // 执行环境标记
   // Phase fields (预处理阶段)
   phase?: string;
   description?: string;
@@ -452,6 +453,17 @@ export async function testModelConnection(params: {
   if (!res.ok) {
     const err = await res.json();
     throw new Error(err.detail || "Model connection test failed");
+  }
+  return await res.json();
+}
+
+// ============================================
+// Docker Check API
+// ============================================
+export async function checkDockerAvailable(): Promise<{ available: boolean; message: string }> {
+  const res = await fetch(`${API_BASE}/api/docker/check`);
+  if (!res.ok) {
+    return { available: false, message: "Docker 检测请求失败" };
   }
   return await res.json();
 }

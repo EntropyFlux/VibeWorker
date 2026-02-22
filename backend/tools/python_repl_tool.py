@@ -195,7 +195,9 @@ def python_repl(code: str) -> str:
             from security import docker_sandbox
             if docker_sandbox.available:
                 output, returncode = docker_sandbox.run_python(code)
-                return output.strip() or "(no output)"
+                # 添加 [DOCKER] 前缀标记执行环境
+                result = output.strip() or "(no output)"
+                return f"[DOCKER]{result}"
     except Exception:
         pass  # Fall through to local execution
 

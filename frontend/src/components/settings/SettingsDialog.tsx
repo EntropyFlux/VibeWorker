@@ -19,6 +19,7 @@ import {
     updateAssignments, testPoolModel,
     fetchGraphConfig, updateGraphConfig, type GraphConfigData,
     type PoolModel, type ModelPoolData, type TestModelResult,
+    checkDockerAvailable,
 } from "@/lib/api";
 
 function SettingsField({
@@ -433,6 +434,145 @@ function ModelPoolTab() {
                     </div>
                 ))}
             </div>
+        </div>
+    );
+}
+
+// ============================================
+// Docker Sandbox Field (含可用性检测)
+// ============================================
+function DockerSandboxField({
+    checked,
+    onChange,
+    network,
+    onNetworkChange,
+}: {
+    checked: boolean;
+    onChange: (v: boolean) => void;
+    network: string;
+    onNetworkChange: (v: string) => void;
+}) {
+    const [dockerStatus, setDockerStatus] = useState<"idle" | "checking" | "available" | "unavailable">("idle");
+    const [dockerMessage, setDockerMessage] = useState("");
+
+    // 打开设置时，如果 Docker 已开启，自动检测一次
+    useEffect(() => {
+        if (checked) {
+            checkStatus();
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    const checkStatus = async () => {
+        setDockerStatus("checking");
+        try {
+            const result = await checkDockerAvailable();
+            setDockerStatus(result.available ? "available" : "unavailable");
+            setDockerMessage(result.message);
+        } catch {
+            setDockerStatus("unavailable");
+            setDockerMessage("Docker 检测请求失败");
+        }
+    };
+
+    const handleToggle = async (v: boolean) => {
+        if (!v) {
+            // 关闭时直接关
+            onChange(false);
+            setDockerStatus("idle");
+            return;
+        }
+        // 开启时先检测
+        setDockerStatus("checking");
+        try {
+            const result = await checkDockerAvailable();
+            if (result.available) {
+                setDockerStatus("available");
+                setDockerMessage(result.message);
+                onChange(true);
+            } else {
+                setDockerStatus("unavailable");
+                setDockerMessage(result.message);
+                // 不打开开关
+            }
+        } catch {
+            setDockerStatus("unavailable");
+            setDockerMessage("Docker 检测请求失败");
+        }
+    };
+
+    return (
+        <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Docker 沙箱</label>
+            <div className="flex items-center gap-2">
+                <button
+                    type="button"
+                    onClick={() => handleToggle(!checked)}
+                    disabled={dockerStatus === "checking"}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${checked ? "bg-primary" : "bg-border"} ${dockerStatus === "checking" ? "opacity-50" : ""}`}
+                >
+                    <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${checked ? "translate-x-4.5" : "translate-x-0.5"}`} />
+                </button>
+                <span className="text-xs text-muted-foreground">
+                    {dockerStatus === "checking" ? (
+                        <span className="flex items-center gap-1">
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                            检测中...
+                        </span>
+                    ) : checked ? "开启" : "关闭"}
+                </span>
+            </div>
+            {/* Docker 状态提示 */}
+            {dockerStatus === "available" && (
+                <div className="flex items-center gap-1.5 text-[11px] text-green-600 dark:text-green-400">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                    {dockerMessage}
+                </div>
+            )}
+            {dockerStatus === "unavailable" && (
+                <div className="space-y-1">
+                    <div className="flex items-center gap-1.5 text-[11px] text-red-600 dark:text-red-400">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                        {dockerMessage}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground/60">
+                        请先安装 Docker Desktop：
+                        <a
+                            href="https://docs.docker.com/get-docker/"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-primary hover:underline ml-1"
+                        >
+                            安装指南
+                        </a>
+                    </p>
+                </div>
+            )}
+            {/* Docker 网络选择（仅在开启时显示） */}
+            {checked && (
+                <div className="space-y-1.5 ml-4">
+                    <label className="text-xs font-medium text-muted-foreground">Docker 网络</label>
+                    <div className="grid grid-cols-2 gap-2">
+                        {[
+                            { value: "none", label: "无网络", desc: "完全隔离" },
+                            { value: "bridge", label: "桥接", desc: "允许网络" },
+                        ].map((net) => (
+                            <button
+                                key={net.value}
+                                type="button"
+                                onClick={() => onNetworkChange(net.value)}
+                                className={`flex flex-col items-center gap-0.5 py-1.5 rounded-lg border text-xs transition-all ${network === net.value
+                                    ? "border-primary bg-primary/10 text-primary"
+                                    : "border-border bg-background text-muted-foreground hover:border-primary/30"
+                                    }`}
+                            >
+                                <span className="font-medium">{net.label}</span>
+                                <span className="text-[10px] text-muted-foreground/60">{net.desc}</span>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
@@ -955,38 +1095,12 @@ export default function SettingsDialog() {
                                 </div>
 
                                 {/* Docker Sandbox */}
-                                <div className="space-y-1.5">
-                                    <ToggleField
-                                        label="Docker 沙箱"
-                                        checked={form.security_docker_enabled}
-                                        onChange={(v) => updateField("security_docker_enabled", v)}
-                                        hint="(需安装 Docker，可选)"
-                                    />
-                                    {form.security_docker_enabled && (
-                                        <div className="space-y-1.5 ml-4">
-                                            <label className="text-xs font-medium text-muted-foreground">Docker 网络</label>
-                                            <div className="grid grid-cols-2 gap-2">
-                                                {[
-                                                    { value: "none", label: "无网络", desc: "完全隔离" },
-                                                    { value: "bridge", label: "桥接", desc: "允许网络" },
-                                                ].map((net) => (
-                                                    <button
-                                                        key={net.value}
-                                                        type="button"
-                                                        onClick={() => updateField("security_docker_network", net.value)}
-                                                        className={`flex flex-col items-center gap-0.5 py-1.5 rounded-lg border text-xs transition-all ${form.security_docker_network === net.value
-                                                            ? "border-primary bg-primary/10 text-primary"
-                                                            : "border-border bg-background text-muted-foreground hover:border-primary/30"
-                                                            }`}
-                                                    >
-                                                        <span className="font-medium">{net.label}</span>
-                                                        <span className="text-[10px] text-muted-foreground/60">{net.desc}</span>
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
+                                <DockerSandboxField
+                                    checked={form.security_docker_enabled}
+                                    onChange={(v) => updateField("security_docker_enabled", v)}
+                                    network={form.security_docker_network}
+                                    onNetworkChange={(v) => updateField("security_docker_network", v)}
+                                />
                             </div>
                         </TabsContent>
                     </Tabs>

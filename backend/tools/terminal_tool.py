@@ -109,7 +109,9 @@ def terminal(command: str, timeout: Optional[int] = 30) -> str:
             output, returncode = docker_sandbox.run_command(command)
             if returncode != 0 and returncode != -1:
                 output += f"\n[exit code]: {returncode}"
-            return output.strip() or "(no output)"
+            # 添加 [DOCKER] 前缀标记执行环境
+            result = output.strip() or "(no output)"
+            return f"[DOCKER]{result}"
     except Exception:
         pass  # Fall through to local execution
 

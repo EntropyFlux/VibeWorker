@@ -600,6 +600,25 @@ async def security_status():
 
 
 # ============================================
+# Docker 检测端点
+# ============================================
+@app.get("/api/docker/check")
+async def check_docker():
+    """检测 Docker 是否可用（独立于配置开关）。"""
+    try:
+        from security.docker_sandbox import DockerSandbox
+        # 创建临时实例进行检测，不影响全局单例的缓存状态
+        checker = DockerSandbox()
+        is_available = checker.available
+        if is_available:
+            return {"available": True, "message": "Docker 已就绪"}
+        else:
+            return {"available": False, "message": "Docker 未安装或未运行，请先安装并启动 Docker"}
+    except Exception as e:
+        return {"available": False, "message": f"Docker 检测失败: {str(e)}"}
+
+
+# ============================================
 # 文件端点
 # ============================================
 @app.get("/api/files")

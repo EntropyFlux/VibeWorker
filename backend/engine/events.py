@@ -85,13 +85,14 @@ def build_tool_start(tool_name: str, tool_input, motivation: str = None) -> dict
     }
 
 
-def build_tool_end(tool_name: str, output: str, cached: bool, duration_ms: int = None) -> dict:
+def build_tool_end(tool_name: str, output: str, cached: bool, duration_ms: int = None, sandbox: str = "local") -> dict:
     return {
         "type": TOOL_END,
         "tool": tool_name,
         "output": output,
         "cached": cached,
         "duration_ms": duration_ms,
+        "sandbox": sandbox,
     }
 
 
@@ -160,11 +161,19 @@ def build_tool_end_from_raw(event: dict, duration_ms: Optional[int] = None) -> d
         output_str = str(tool_output)
 
     output_str = output_str[:2000]
+
+    # 检测 [DOCKER] 前缀，标记执行环境
+    sandbox = "local"
+    if output_str.startswith('[DOCKER]'):
+        sandbox = "docker"
+        output_str = output_str[8:]  # 去掉 [DOCKER] 前缀
+        logger.info(f"🐳 Docker 沙箱执行: {tool_name}")
+
     is_cached = output_str.startswith('[CACHE_HIT]')
     if is_cached:
         logger.info(f"✓ 工具缓存命中: {tool_name}")
 
-    return build_tool_end(tool_name, output_str, is_cached, duration_ms)
+    return build_tool_end(tool_name, output_str, is_cached, duration_ms, sandbox)
 
 
 def build_llm_end_from_raw(event: dict, tracked: dict) -> dict:

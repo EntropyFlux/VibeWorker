@@ -78,6 +78,27 @@ function getToolDisplay(toolName: string) {
     return { label: toolName, icon: "🔧" };
 }
 
+/** 判断工具是否支持显示沙箱环境标签（仅 terminal 和 python_repl） */
+function showsSandboxTag(toolName: string): boolean {
+    return toolName === "terminal" || toolName === "python_repl";
+}
+
+/** 渲染沙箱环境标签 */
+function SandboxTag({ sandbox }: { sandbox?: "local" | "docker" }) {
+    if (sandbox === "docker") {
+        return (
+            <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium">
+                🐳 Docker
+            </span>
+        );
+    }
+    return (
+        <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground/60 font-medium">
+            💻 本地
+        </span>
+    );
+}
+
 /** Normalize a tool call: detect [CACHE_HIT] marker in output and strip it */
 function normalizeToolCall(tc: ToolCall): ToolCall {
     if (tc.cached || !tc.output?.startsWith("[CACHE_HIT]")) return tc;
@@ -428,6 +449,7 @@ export default function ChatPanel({
                                             }
                                             // seg.type === "tool"
                                             const tc = normalizeToolCall(seg as ToolCall);
+                                            const segWithSandbox = seg as MessageSegment & { sandbox?: "local" | "docker" };
                                             const expandKey = i * 1000 + j;
                                             return (
                                                 <div key={j} className="my-2">
@@ -443,6 +465,9 @@ export default function ChatPanel({
                                                             <span className="text-xs text-muted-foreground/60 truncate flex-1 font-mono">
                                                                 {getToolInputSummary(tc.tool, tc.input)}
                                                             </span>
+                                                            {showsSandboxTag(tc.tool) && tc.output && (
+                                                                <SandboxTag sandbox={segWithSandbox.sandbox} />
+                                                            )}
                                                             {tc.cached && (
                                                                 <span title="使用缓存" className="inline-flex">
                                                                     <Zap className="w-3 h-3 text-muted-foreground/30" />
@@ -611,6 +636,7 @@ export default function ChatPanel({
                                     }
                                     // seg.type === "tool"
                                     const isComplete = !!seg.output;
+                                    const streamSegWithSandbox = seg as MessageSegment & { sandbox?: "local" | "docker" };
                                     return (
                                         <div key={j} className="my-2">
                                             <div className="tool-call-card">
@@ -625,6 +651,9 @@ export default function ChatPanel({
                                                     <span className="text-xs text-muted-foreground/60 truncate flex-1 font-mono">
                                                         {getToolInputSummary(seg.tool, seg.input)}
                                                     </span>
+                                                    {showsSandboxTag(seg.tool) && isComplete && (
+                                                        <SandboxTag sandbox={streamSegWithSandbox.sandbox} />
+                                                    )}
                                                     {seg.cached && (
                                                         <span title="使用缓存" className="inline-flex">
                                                             <Zap className="w-3 h-3 text-muted-foreground/30" />
