@@ -437,29 +437,61 @@ class SessionStore {
           }
 
           case "phase": {
-            // memory_recall 仅作为 streamingPhase 指示器，不单独创建 debug 卡片
-            // memory_recall_done 作为合并后的卡片显示在 debug 面板
+            // 更新底部状态栏
             if (event.phase === "memory_recall") {
               this.updateSession(sessionId, { streamingPhase: event.description || "" });
-              break;
-            }
-            // memory_recall_done 不更新 streamingPhase（保留"正在召回..."直到 llm_start）
-            if (event.phase !== "memory_recall_done") {
+            } else if (event.phase !== "memory_recall_done") {
               this.updateSession(sessionId, { streamingPhase: event.description || "" });
             }
-            // 添加到 debug 面板（memory_recall_done 合并展示为记忆召回卡片）
+
+            // 添加到 debug 面板
             if (debugEnabled) {
               const calls = this.getState(sessionId).debugCalls;
-              this.updateSession(sessionId, {
-                debugCalls: [...calls, {
-                  _type: "phase" as const,
-                  phase: event.phase || "",
-                  description: event.description || "",
-                  timestamp: new Date().toISOString(),
-                  items: event.items,
-                  mode: event.mode,
-                } as DebugPhase],
-              });
+
+              if (event.phase === "memory_recall_done") {
+                // memory_recall_done: 查找并替换之前的 memory_recall 卡片
+                const recallIndex = calls.findIndex(
+                  (c) => isPhase(c) && c.phase === "memory_recall"
+                );
+
+                if (recallIndex >= 0) {
+                  // 替换为完整的召回结果卡片
+                  const updatedCalls = [...calls];
+                  updatedCalls[recallIndex] = {
+                    _type: "phase" as const,
+                    phase: "memory_recall_done",
+                    description: event.description || "",
+                    timestamp: updatedCalls[recallIndex].timestamp, // 保留原始时间戳
+                    items: event.items,
+                    mode: event.mode,
+                  } as DebugPhase;
+                  this.updateSession(sessionId, { debugCalls: updatedCalls });
+                } else {
+                  // 没找到 memory_recall 卡片，直接添加（降级处理）
+                  this.updateSession(sessionId, {
+                    debugCalls: [...calls, {
+                      _type: "phase" as const,
+                      phase: "memory_recall_done",
+                      description: event.description || "",
+                      timestamp: new Date().toISOString(),
+                      items: event.items,
+                      mode: event.mode,
+                    } as DebugPhase],
+                  });
+                }
+              } else {
+                // 其他 phase 事件（包括 memory_recall）：直接添加
+                this.updateSession(sessionId, {
+                  debugCalls: [...calls, {
+                    _type: "phase" as const,
+                    phase: event.phase || "",
+                    description: event.description || "",
+                    timestamp: new Date().toISOString(),
+                    items: event.items,
+                    mode: event.mode,
+                  } as DebugPhase],
+                });
+              }
             }
             break;
           }

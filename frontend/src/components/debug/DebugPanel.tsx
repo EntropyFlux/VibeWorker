@@ -109,7 +109,8 @@ const PHASE_ICONS: Record<string, string> = {
   graph_config: "⚙️",
   tools: "🔧",
   prompt: "📝",
-  memory_recall_done: "🧠",
+  memory_recall: "🔍", // 正在搜索记忆
+  memory_recall_done: "🧠", // 召回完成
 };
 
 // 记忆分类中文映射
