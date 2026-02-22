@@ -54,6 +54,7 @@ export default function HomePage() {
   const draggingRef = useRef<"left" | "right" | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const sidebarRefreshRef = useRef<() => void>(() => {});
+  const sidebarUpdateTitleRef = useRef<(sessionId: string, title: string) => void>(() => {});
 
   // Initialize theme + panel widths from localStorage on mount
   useEffect(() => {
@@ -112,7 +113,19 @@ export default function HomePage() {
     return () => clearInterval(interval);
   }, []);
 
-  // Register first-message callback for title generation
+  // 用户按回车发送首条消息时立即触发：截断用户输入作为临时标题
+  useEffect(() => {
+    sessionStore.setOnFirstMessageSent((sessionId: string, message: string) => {
+      const trimmed = message.trim();
+      const instantTitle = trimmed.slice(0, 30) + (trimmed.length > 30 ? "..." : "");
+      if (instantTitle) {
+        sidebarUpdateTitleRef.current(sessionId, instantTitle);
+      }
+    });
+    return () => sessionStore.setOnFirstMessageSent(null);
+  }, []);
+
+  // SSE 流结束后触发：异步调用 LLM 生成正式标题覆盖临时标题
   useEffect(() => {
     sessionStore.setOnFirstMessage(async (sessionId: string) => {
       try {
@@ -313,6 +326,9 @@ export default function HomePage() {
             onFileOpen={handleFileOpen}
             onRefreshReady={(refreshFn) => {
               sidebarRefreshRef.current = refreshFn;
+            }}
+            onUpdateTitleReady={(updateFn) => {
+              sidebarUpdateTitleRef.current = updateFn;
             }}
             onMemoryEntryOpen={handleMemoryEntryOpen}
             onDailyLogEntryOpen={handleDailyLogEntryOpen}

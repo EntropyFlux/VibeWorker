@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/tooltip";
 import { fetchSessions, createSession, deleteSession, fetchSkills, deleteSkill, type Session, type Skill, type MemoryEntry, type DailyLogEntry } from "@/lib/api";
 import { useIsSessionStreaming, sessionStore } from "@/lib/sessionStore";
+import { formatRelativeTime } from "@/lib/utils";
 import SkillsStoreDialog from "@/components/store/SkillsStoreDialog";
 import CachePanel from "./CachePanel";
 import MemoryPanel from "./MemoryPanel";
@@ -35,6 +36,7 @@ interface SidebarProps {
     currentView: ViewMode;
     onFileOpen?: (path: string) => void;
     onRefreshReady?: (refreshFn: () => void) => void;
+    onUpdateTitleReady?: (updateFn: (sessionId: string, title: string) => void) => void;
     onMemoryEntryOpen?: (entry: MemoryEntry) => void;
     onDailyLogEntryOpen?: (date: string, entry: DailyLogEntry) => void;
     memoryRefreshKey?: number;
@@ -76,7 +78,7 @@ const SessionItem = React.forwardRef<HTMLButtonElement, {
                 </span>
             )}
             <span className="text-[10px] text-muted-foreground/40 shrink-0">
-                {session.message_count}
+                {formatRelativeTime(session.updated_at)}
             </span>
             <Trash2
                 className="w-3.5 h-3.5 opacity-0 group-hover:opacity-40 hover:!opacity-100 hover:text-destructive shrink-0 transition-opacity"
@@ -172,6 +174,7 @@ export default function Sidebar({
     currentView,
     onFileOpen,
     onRefreshReady,
+    onUpdateTitleReady,
     onMemoryEntryOpen,
     onDailyLogEntryOpen,
     memoryRefreshKey,
@@ -192,6 +195,21 @@ export default function Sidebar({
             onRefreshReady(loadSessions);
         }
     }, [onRefreshReady]);
+
+    // 暴露即时更新会话标题的函数给父组件
+    const updateSessionTitle = useCallback((sessionId: string, title: string) => {
+        setSessions((prev) =>
+            prev.map((s) =>
+                s.session_id === sessionId ? { ...s, title } : s
+            )
+        );
+    }, []);
+
+    useEffect(() => {
+        if (onUpdateTitleReady) {
+            onUpdateTitleReady(updateSessionTitle);
+        }
+    }, [onUpdateTitleReady, updateSessionTitle]);
 
     useEffect(() => {
         if (currentView === "skills") {

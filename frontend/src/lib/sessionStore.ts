@@ -156,7 +156,9 @@ class SessionStore {
   private sessions = new Map<string, SessionState>();
   private abortControllers = new Map<string, AbortController>();
   private listeners = new Set<Listener>();
-  private onFirstMessageCallback: ((sessionId: string) => void) | null = null;
+  private onFirstMessageCallback: ((sessionId: string, message: string) => void) | null = null;
+  // 用户发送首条消息时立即触发（流开始前），用于即时设置标题
+  private onFirstMessageSentCallback: ((sessionId: string, message: string) => void) | null = null;
   // Session-level auto-approved tools (cleared when session ends or page refreshes)
   private sessionAllowedTools = new Map<string, Set<string>>();
   // Plan 活动描述节流：记录每个 session 上次因 token 事件更新活动描述的时间戳
@@ -271,6 +273,11 @@ class SessionStore {
         },
       ] : this.getState(sessionId).debugCalls,
     });
+
+    // 首条消息立即触发回调（用于即时标题），在 SSE 流开始前执行
+    if (isFirstMessage && this.onFirstMessageSentCallback) {
+      this.onFirstMessageSentCallback(sessionId, message);
+    }
 
     let fullContent = "";
     const toolCalls: ToolCall[] = [];
@@ -823,9 +830,9 @@ class SessionStore {
 
     this.abortControllers.delete(sessionId);
 
-    // First-message callback (title generation, etc.)
+    // 流结束后回调（LLM 标题生成等）
     if (isFirstMessage && this.onFirstMessageCallback) {
-      this.onFirstMessageCallback(sessionId);
+      this.onFirstMessageCallback(sessionId, message);
     }
   }
 
@@ -879,8 +886,12 @@ class SessionStore {
 
   // ---- Lifecycle ----
 
-  setOnFirstMessage(callback: ((sessionId: string) => void) | null): void {
+  setOnFirstMessage(callback: ((sessionId: string, message: string) => void) | null): void {
     this.onFirstMessageCallback = callback;
+  }
+
+  setOnFirstMessageSent(callback: ((sessionId: string, message: string) => void) | null): void {
+    this.onFirstMessageSentCallback = callback;
   }
 
   removeSession(sessionId: string): void {
