@@ -47,6 +47,10 @@ export interface SessionState {
   approvalRequest: ApprovalRequestData | null;
   planApprovalRequest: PlanApprovalRequestData | null;
   currentPlan: Plan | null;
+  // PlanCard 淡出状态：流结束时先设为 true 播放过渡动画，延迟后再清除 currentPlan
+  planFadeOut: boolean;
+  // 步骤开始时间戳，用于计算耗时（key: step_id, value: timestamp ms）
+  planStepTimestamps: Record<number, number>;
   messagesLoaded: boolean;
   messagesLoading: boolean;
   debugCalls: DebugCall[];
@@ -64,6 +68,8 @@ function defaultState(): SessionState {
     approvalRequest: null,
     planApprovalRequest: null,
     currentPlan: null,
+    planFadeOut: false,
+    planStepTimestamps: {},
     messagesLoaded: false,
     messagesLoading: false,
     debugCalls: [],
@@ -327,27 +333,7 @@ class SessionStore {
               this.updateSession(sessionId, { debugCalls: calls });
             }
 
-            // Auto-advance plan steps when non-plan tools complete
-            const toolName = event.tool || "";
-            if (toolName !== "plan_create") {
-              const plan = this.getState(sessionId).currentPlan;
-              if (plan) {
-                const runningStep = plan.steps.find((s) => s.status === "running");
-                if (runningStep) {
-                  // Mark running step as completed, and next pending step as running
-                  const nextStep = plan.steps.find((s) => s.id > runningStep.id && s.status === "pending");
-                  const updatedPlan: Plan = {
-                    ...plan,
-                    steps: plan.steps.map((s) => {
-                      if (s.id === runningStep.id) return { ...s, status: "completed" as const };
-                      if (nextStep && s.id === nextStep.id) return { ...s, status: "running" as const };
-                      return s;
-                    }),
-                  };
-                  this.updateSession(sessionId, { currentPlan: updatedPlan });
-                }
-              }
-            }
+            // 步骤状态完全由后端 plan_updated 事件驱动，不再在前端 auto-advance
             break;
           }
 
@@ -453,14 +439,11 @@ class SessionStore {
 
           case "plan_created":
             if (event.plan) {
-              // Auto-mark first step as running
-              const newPlan: Plan = {
-                ...event.plan,
-                steps: event.plan.steps.map((s, idx) =>
-                  idx === 0 ? { ...s, status: "running" as const } : s
-                ),
-              };
-              this.updateSession(sessionId, { currentPlan: newPlan });
+              // 不再预设第一步为 running，由后端 executor_pre 节点发送 running 事件
+              this.updateSession(sessionId, {
+                currentPlan: event.plan,
+                planStepTimestamps: {},
+              });
             }
             break;
 
@@ -475,7 +458,16 @@ class SessionStore {
                     : s
                 ),
               };
-              this.updateSession(sessionId, { currentPlan: updatedPlan });
+              // 记录步骤开始/结束时间戳，用于计算耗时
+              const timestamps = { ...this.getState(sessionId).planStepTimestamps };
+              const stepId = event.step_id as number;
+              if (event.status === "running") {
+                timestamps[stepId] = Date.now();
+              }
+              this.updateSession(sessionId, {
+                currentPlan: updatedPlan,
+                planStepTimestamps: timestamps,
+              });
             }
             break;
           }
@@ -574,16 +566,44 @@ class SessionStore {
         };
       }
     }
+
     // 只在有实际内容或工具调用时追加 assistant 消息，避免空消息
     const currentMessages = finalState.messages;
-    if (fullContent || toolCalls.length > 0) {
+
+    if (finalPlan) {
+      // 有计划时：先更新计划 + 设置 planFadeOut 播放过渡动画
       const assistantMsg: ChatMessage = {
         role: "assistant",
         content: fullContent,
         timestamp: new Date().toISOString(),
         tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
         segments: segments.length > 0 ? segments : undefined,
-        plan: finalPlan || undefined,
+        plan: finalPlan,
+      };
+      this.updateSession(sessionId, {
+        messages: [...currentMessages, assistantMsg],
+        isStreaming: false,
+        streamingContent: "",
+        streamingSegments: [],
+        thinkingSteps: [],
+        currentPlan: finalPlan,
+        planFadeOut: true,
+      });
+      // 延迟 500ms 后清除 currentPlan，让 PlanCard 有时间播放淡出动画
+      setTimeout(() => {
+        this.updateSession(sessionId, {
+          currentPlan: null,
+          planFadeOut: false,
+          planStepTimestamps: {},
+        });
+      }, 500);
+    } else if (fullContent || toolCalls.length > 0) {
+      const assistantMsg: ChatMessage = {
+        role: "assistant",
+        content: fullContent,
+        timestamp: new Date().toISOString(),
+        tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+        segments: segments.length > 0 ? segments : undefined,
       };
       this.updateSession(sessionId, {
         messages: [...currentMessages, assistantMsg],
@@ -592,6 +612,8 @@ class SessionStore {
         streamingSegments: [],
         thinkingSteps: [],
         currentPlan: null,
+        planFadeOut: false,
+        planStepTimestamps: {},
       });
     } else {
       this.updateSession(sessionId, {
@@ -600,6 +622,8 @@ class SessionStore {
         streamingSegments: [],
         thinkingSteps: [],
         currentPlan: null,
+        planFadeOut: false,
+        planStepTimestamps: {},
       });
     }
 

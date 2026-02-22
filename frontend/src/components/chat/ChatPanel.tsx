@@ -248,7 +248,7 @@ export default function ChatPanel({
     onFileOpen,
 }: ChatPanelProps) {
     // Store-driven state
-    const { messages, isStreaming, streamingContent, streamingSegments, thinkingSteps, approvalRequest, planApprovalRequest, currentPlan } = useSessionState(sessionId);
+    const { messages, isStreaming, streamingContent, streamingSegments, thinkingSteps, approvalRequest, planApprovalRequest, currentPlan, planFadeOut, planStepTimestamps } = useSessionState(sessionId);
     const { sendMessage, stopStream, clearApproval, addSessionAllowedTool, approvePlan } = useSessionActions(sessionId);
 
     // Local UI state
@@ -327,6 +327,19 @@ export default function ChatPanel({
         <div className="flex flex-col h-full">
             {/* Messages Area */}
             <div className="flex-1 overflow-y-auto px-6 py-4">
+                {/* Sticky PlanCard — 执行中悬浮在滚动区域顶部 */}
+                {currentPlan && (isStreaming || planFadeOut) && (
+                    <div className="sticky top-0 z-10 -mx-6 px-6 pt-2 pb-1 bg-gradient-to-b from-background via-background/95 to-transparent">
+                        <PlanCard
+                            plan={currentPlan}
+                            isLive={isStreaming && !planFadeOut}
+                            isFadingOut={planFadeOut}
+                            awaitingApproval={!!planApprovalRequest && planApprovalRequest.plan_id === currentPlan.plan_id}
+                            onApprove={approvePlan}
+                            stepTimestamps={planStepTimestamps}
+                        />
+                    </div>
+                )}
                 {messages.length === 0 && !isStreaming && (
                     <div className="flex flex-col items-center justify-center h-full text-center animate-fade-in-up">
                         <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[var(--vw-blue)] to-[var(--vw-blue)]/70 flex items-center justify-center mb-4 shadow-lg">
@@ -523,15 +536,7 @@ export default function ChatPanel({
                 {/* Streaming response — 按时间顺序穿插显示文本和工具调用 */}
                 {isStreaming && (
                     <div className="mb-4 animate-fade-in-up">
-                        {/* Live Plan Card */}
-                        {currentPlan && (
-                            <PlanCard
-                              plan={currentPlan}
-                              isLive
-                              awaitingApproval={!!planApprovalRequest && planApprovalRequest.plan_id === currentPlan.plan_id}
-                              onApprove={approvePlan}
-                            />
-                        )}
+                        {/* PlanCard 已移至 sticky 区域 */}
                         {/* 按 segments 时间顺序渲染 */}
                         {streamingSegments.length > 0 && (
                             <>

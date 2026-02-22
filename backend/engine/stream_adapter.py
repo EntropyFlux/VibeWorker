@@ -204,6 +204,7 @@ def _format_debug_input(messages_str: str) -> str:
 # 节点到 motivation 的映射
 _NODE_MOTIVATIONS = {
     "agent": "调用大模型进行推理",
+    "executor_pre": "准备执行计划步骤",
     "executor": "执行计划步骤",
     "replanner": "评估是否需要调整计划",
     "summarizer": "生成计划执行总结",

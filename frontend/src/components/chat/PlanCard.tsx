@@ -1,113 +1,122 @@
 "use client";
 
-import React, { useState } from "react";
-import type { Plan, PlanStep } from "@/lib/api";
+import React, { useState, useEffect, useRef } from "react";
+import type { Plan } from "@/lib/api";
+import PlanTimeline from "./PlanTimeline";
 
 interface PlanCardProps {
   plan: Plan;
   isLive?: boolean;
   defaultCollapsed?: boolean;
-  /** Show approval buttons when plan_require_approval is enabled */
+  /** PlanCard 正在淡出 */
+  isFadingOut?: boolean;
+  /** 淡出完成后的回调 */
+  onFadeOutComplete?: () => void;
+  /** 审批按钮 */
   awaitingApproval?: boolean;
   onApprove?: (planId: string, approved: boolean) => void;
-}
-
-function StepIcon({ status, isLive }: { status: string; isLive?: boolean }) {
-  switch (status) {
-    case "completed":
-      return <span className="text-green-500 text-sm leading-none">&#x2705;</span>;
-    case "running":
-      return (
-        <span className={`text-amber-500 text-sm leading-none ${isLive ? "animate-pulse-soft" : ""}`}>
-          &#x23F3;
-        </span>
-      );
-    case "failed":
-      return <span className="text-red-500 text-sm leading-none">&#x274C;</span>;
-    default:
-      return (
-        <span className="inline-block w-3.5 h-3.5 rounded-full border-2 border-muted-foreground/30 flex-shrink-0" />
-      );
-  }
+  /** 步骤时间戳，用于计算耗时 */
+  stepTimestamps?: Record<number, number>;
 }
 
 export default function PlanCard({
   plan,
   isLive = false,
   defaultCollapsed = false,
+  isFadingOut = false,
+  onFadeOutComplete,
   awaitingApproval = false,
   onApprove,
+  stepTimestamps = {},
 }: PlanCardProps) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
+  const autoCollapseRef = useRef(false);
+
   const completedCount = plan.steps.filter((s) => s.status === "completed").length;
   const failedCount = plan.steps.filter((s) => s.status === "failed").length;
   const totalCount = plan.steps.length;
   const progress = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
   const allDone = completedCount === totalCount && totalCount > 0;
 
+  // 自动折叠：所有步骤完成后 1.5s 自动折叠（仅 isLive 模式）
+  useEffect(() => {
+    if (isLive && allDone && !autoCollapseRef.current) {
+      autoCollapseRef.current = true;
+      const timer = setTimeout(() => {
+        setCollapsed(true);
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [isLive, allDone]);
+
+  // 淡出动画完成后的回调
+  useEffect(() => {
+    if (isFadingOut && onFadeOutComplete) {
+      const timer = setTimeout(onFadeOutComplete, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [isFadingOut, onFadeOutComplete]);
+
   return (
-    <div className="plan-card mb-3 rounded-xl border border-border/60 bg-card/80 backdrop-blur-sm shadow-sm overflow-hidden">
-      {/* Header — always visible, clickable to toggle */}
+    <div
+      className={`plan-card mb-3 rounded-xl border border-border/60 bg-card/80 backdrop-blur-sm shadow-sm overflow-hidden transition-all duration-500 ${
+        isFadingOut ? "opacity-0 max-h-0 mb-0 border-transparent" : "opacity-100"
+      }`}
+    >
+      {/* Header — 始终可见，可折叠 */}
       <div
-        className={`flex items-center gap-2 px-4 py-2.5 ${collapsed ? "" : "border-b border-border/40"} bg-muted/30 cursor-pointer select-none hover:bg-muted/50 transition-colors`}
+        className={`flex items-center gap-2 px-4 py-2.5 ${
+          collapsed ? "" : "border-b border-border/40"
+        } bg-muted/30 cursor-pointer select-none hover:bg-muted/50 transition-colors`}
         onClick={() => setCollapsed(!collapsed)}
       >
         <span className="text-base leading-none">&#x1F4CB;</span>
-        <span className="text-sm font-semibold text-foreground truncate">
+        <span className="text-sm font-semibold text-foreground truncate flex-1">
           {plan.title}
         </span>
+
         {awaitingApproval && (
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 font-medium animate-pulse">
             &#x23F3; 等待确认
           </span>
         )}
-        <span className="ml-auto flex items-center gap-2">
+
+        {/* 迷你进度条 — 折叠时仍可见 */}
+        <div className="flex items-center gap-2 ml-auto">
+          <div className="w-16 h-1.5 rounded-full bg-muted/60 overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ease-out ${
+                allDone ? "bg-green-500" : failedCount > 0 ? "bg-red-400" : "bg-[var(--vw-blue)]"
+              }`}
+              style={{ width: `${progress}%` }}
+            />
+          </div>
           {allDone ? (
-            <span className="text-xs text-green-600 font-medium">&#x2705; 已完成</span>
+            <span className="text-xs text-green-600 dark:text-green-400 font-medium whitespace-nowrap">&#x2713; 完成</span>
           ) : failedCount > 0 ? (
-            <span className="text-xs text-red-500 font-medium">{completedCount}/{totalCount}</span>
+            <span className="text-xs text-red-500 font-medium tabular-nums whitespace-nowrap">{completedCount}/{totalCount}</span>
           ) : (
-            <span className="text-xs text-muted-foreground/60 tabular-nums">{completedCount}/{totalCount}</span>
+            <span className="text-xs text-muted-foreground/60 tabular-nums whitespace-nowrap">{completedCount}/{totalCount}</span>
           )}
           <span className="text-xs text-muted-foreground/40">
             {collapsed ? "▶" : "▼"}
           </span>
-        </span>
+        </div>
       </div>
 
-      {/* Collapsible body */}
+      {/* 可折叠内容 */}
       {!collapsed && (
         <>
-          {/* Steps */}
-          <div className="px-4 py-2.5 space-y-1.5">
-            {plan.steps.map((step) => {
-              const isRevised = !!(step as PlanStep & { _revised?: boolean })._revised;
-              return (
-                <div
-                  key={step.id}
-                  className={`flex items-center gap-2.5 py-1 text-sm transition-opacity ${
-                    step.status === "completed"
-                      ? "text-muted-foreground"
-                      : step.status === "running"
-                      ? "text-foreground font-medium"
-                      : "text-muted-foreground/70"
-                  }`}
-                >
-                  <StepIcon status={step.status} isLive={isLive} />
-                  <span className="truncate">
-                    {step.id}. {step.title}
-                  </span>
-                  {isRevised && (
-                    <span className="text-[10px] px-1 py-0.5 rounded bg-orange-100 dark:bg-orange-950 text-orange-600 dark:text-orange-400 shrink-0">
-                      &#x1F504; 已调整
-                    </span>
-                  )}
-                </div>
-              );
-            })}
+          {/* 时间线 */}
+          <div className="px-4 py-2.5">
+            <PlanTimeline
+              steps={plan.steps}
+              isLive={isLive}
+              stepTimestamps={stepTimestamps}
+            />
           </div>
 
-          {/* Approval Buttons */}
+          {/* 审批按钮 */}
           {awaitingApproval && onApprove && (
             <div className="px-4 py-2.5 border-t border-border/40 flex items-center gap-2">
               <button
@@ -132,23 +141,6 @@ export default function PlanCard({
               </button>
             </div>
           )}
-
-          {/* Progress Bar */}
-          <div className="px-4 pb-3 pt-1">
-            <div className="flex items-center gap-2">
-              <div className="flex-1 h-1.5 rounded-full bg-muted/60 overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all duration-500 ease-out ${
-                    allDone ? "bg-green-500" : "bg-[var(--vw-blue)]"
-                  }`}
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-              <span className="text-xs text-muted-foreground/60 tabular-nums whitespace-nowrap">
-                {completedCount}/{totalCount}
-              </span>
-            </div>
-          </div>
         </>
       )}
     </div>

@@ -22,6 +22,7 @@ from engine.edges import (
 from engine.nodes import (
     agent_node,
     approval_node,
+    executor_pre_node,
     executor_node,
     plan_gate_node,
     replanner_node,
@@ -66,6 +67,7 @@ def build_graph(graph_config: dict):
         if approval_enabled:
             graph.add_node("approval", approval_node)
 
+        graph.add_node("executor_pre", executor_pre_node)
         graph.add_node("executor", executor_node)
 
         if replanner_enabled:
@@ -86,40 +88,43 @@ def build_graph(graph_config: dict):
             END: END,
         })
 
-        # plan_gate → approval | executor
+        # executor_pre → executor（始终连接）
+        graph.add_edge("executor_pre", "executor")
+
+        # plan_gate → approval | executor_pre
         if approval_enabled:
             def _route_plan_gate(state):
                 return route_after_plan_gate(state, approval_enabled=True)
 
             graph.add_conditional_edges("plan_gate", _route_plan_gate, {
                 "approval": "approval",
-                "executor": "executor",
+                "executor_pre": "executor_pre",
             })
 
-            # approval → executor | agent
+            # approval → executor_pre | agent
             graph.add_conditional_edges("approval", route_after_approval, {
-                "executor": "executor",
+                "executor_pre": "executor_pre",
                 "agent": "agent",
             })
         else:
-            graph.add_edge("plan_gate", "executor")
+            graph.add_edge("plan_gate", "executor_pre")
 
         if replanner_enabled:
             # executor → replanner
             graph.add_edge("executor", "replanner")
 
             if summarizer_enabled:
-                # replanner → executor | summarizer
+                # replanner → executor_pre | summarizer
                 graph.add_conditional_edges("replanner", route_after_replanner, {
-                    "executor": "executor",
+                    "executor_pre": "executor_pre",
                     "summarizer": "summarizer",
                 })
                 # summarizer → agent（回到主循环）
                 graph.add_edge("summarizer", "agent")
             else:
-                # replanner → executor | END
+                # replanner → executor_pre | END
                 graph.add_conditional_edges("replanner", route_after_replanner, {
-                    "executor": "executor",
+                    "executor_pre": "executor_pre",
                     "summarizer": END,  # summarizer 禁用时直连 END
                 })
         else:
@@ -135,10 +140,10 @@ def build_graph(graph_config: dict):
                     max_steps = nodes_cfg.get("executor", {}).get("max_steps", 8)
                     if step_index >= total_steps or step_index >= max_steps:
                         return "summarizer"
-                    return "executor"
+                    return "executor_pre"
 
                 graph.add_conditional_edges("executor", _route_executor_no_replanner, {
-                    "executor": "executor",
+                    "executor_pre": "executor_pre",
                     "summarizer": "summarizer",
                 })
                 graph.add_edge("summarizer", "agent")
@@ -153,10 +158,10 @@ def build_graph(graph_config: dict):
                     max_steps = nodes_cfg.get("executor", {}).get("max_steps", 8)
                     if step_index >= total_steps or step_index >= max_steps:
                         return END
-                    return "executor"
+                    return "executor_pre"
 
                 graph.add_conditional_edges("executor", _route_executor_minimal, {
-                    "executor": "executor",
+                    "executor_pre": "executor_pre",
                     END: END,
                 })
     else:

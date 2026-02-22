@@ -227,6 +227,17 @@
   animation: pulse-soft 1.5s ease-in-out infinite;
 }
 
+/* 步骤完成打勾弹入动画 */
+@keyframes checkMark {
+  0% { transform: scale(0); opacity: 0; }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.animate-check {
+  animation: checkMark 0.3s ease-out forwards;
+}
+
 /* ============================================
    Chat & Markdown Styling
    ============================================ */

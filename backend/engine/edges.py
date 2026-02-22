@@ -29,17 +29,17 @@ def route_after_plan_gate(state: AgentState, *, approval_enabled: bool = False) 
     """Plan Gate 节点后的路由。
 
     审批启用 → approval
-    审批禁用 → executor
+    审批禁用 → executor_pre（先发送 running 事件，再进入 executor）
     """
     if approval_enabled:
         return "approval"
-    return "executor"
+    return "executor_pre"
 
 
 def route_after_approval(state: AgentState) -> str:
     """Approval 节点后的路由。
 
-    已批准 → executor
+    已批准 → executor_pre（先发送 running 事件，再进入 executor）
     已拒绝 → agent（告知拒绝）
     """
     plan_data = state.get("plan_data")
@@ -47,16 +47,16 @@ def route_after_approval(state: AgentState) -> str:
         # 计划被清除 = 被拒绝
         logger.info("计划被拒绝，路由回 agent")
         return "agent"
-    return "executor"
+    return "executor_pre"
 
 
 def route_after_replanner(state: AgentState) -> str:
     """Replanner 节点后的路由。
 
     finish → summarizer
-    continue/revise → executor
+    continue/revise → executor_pre（先发送 running 事件，再进入 executor）
     """
     action = state.get("replan_action", "continue")
     if action == "finish":
         return "summarizer"
-    return "executor"
+    return "executor_pre"

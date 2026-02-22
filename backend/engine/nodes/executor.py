@@ -61,13 +61,8 @@ async def executor_node(state: AgentState, config: RunnableConfig) -> dict[str, 
 
     pending_events = []
 
-    # 标记步骤为运行中
-    pending_events.append({
-        "type": "plan_updated",
-        "plan_id": plan_id,
-        "step_id": step_id,
-        "status": "running",
-    })
+    # 注意：running 事件已由 executor_pre 节点发送，此处不再重复发送
+    # 这确保 running 和 completed 事件不会在同一批次到达前端
 
     # 构建步骤级 prompt
     executor_prompt = _build_executor_prompt(
