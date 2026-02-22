@@ -1,6 +1,7 @@
 """Search Web Tool - DuckDuckGo 搜索工具，用于获取互联网实时信息。"""
 import logging
 from langchain_core.tools import tool
+from ddgs import DDGS
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +40,6 @@ def search_web(query: str) -> str:
         logger.warning(f"缓存检查失败（将执行搜索）: {e}")
 
     try:
-        # 导入 DuckDuckGo 搜索工具（使用新包名 ddgs）
-        from ddgs import DDGS
-
         # 执行搜索（优化中文搜索）
         with DDGS() as ddgs:
             results = list(ddgs.text(
