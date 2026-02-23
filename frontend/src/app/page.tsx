@@ -17,7 +17,8 @@ import Sidebar from "@/components/sidebar/Sidebar";
 import ChatPanel from "@/components/chat/ChatPanel";
 import InspectorPanel, { type InspectorMode } from "@/components/editor/InspectorPanel";
 import SettingsDialog, { initTheme } from "@/components/settings/SettingsDialog";
-import { checkHealth, generateSessionTitle, type MemoryEntry, type DailyLogEntry } from "@/lib/api";
+import OnboardingModal from "@/components/settings/OnboardingModal";
+import { checkHealth, generateSessionTitle, fetchSettings, fetchModelPool, type MemoryEntry, type DailyLogEntry } from "@/lib/api";
 import { sessionStore } from "@/lib/sessionStore";
 
 type ViewMode = "chat" | "memory" | "skills" | "mcp" | "cache";
@@ -42,6 +43,10 @@ export default function HomePage() {
   const [isBackendOnline, setIsBackendOnline] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
 
+  // Onboarding 状态
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [isModelConfigured, setIsModelConfigured] = useState<boolean>(true);
+
   // 记忆编辑状态
   const [inspectorMode, setInspectorMode] = useState<InspectorMode>("file");
   const [inspectorMemoryEntry, setInspectorMemoryEntry] = useState<MemoryEntry | null>(null);
@@ -53,8 +58,8 @@ export default function HomePage() {
   const [rightWidth, setRightWidth] = useState(RIGHT_DEFAULT);
   const draggingRef = useRef<"left" | "right" | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const sidebarRefreshRef = useRef<() => void>(() => {});
-  const sidebarUpdateTitleRef = useRef<(sessionId: string, title: string) => void>(() => {});
+  const sidebarRefreshRef = useRef<() => void>(() => { });
+  const sidebarUpdateTitleRef = useRef<(sessionId: string, title: string) => void>(() => { });
 
   // Initialize theme + panel widths from localStorage on mount
   useEffect(() => {
@@ -75,6 +80,34 @@ export default function HomePage() {
       const v = Number(savedRight);
       if (v >= RIGHT_MIN && v <= RIGHT_MAX) setRightWidth(v);
     }
+
+    // 检查是否需要显示 onboarding
+    const checkOnboarding = async () => {
+      try {
+        const [settings, poolData] = await Promise.all([
+          fetchSettings(),
+          fetchModelPool()
+        ]);
+
+        // 从本地存储检查是否用户已选择过“稍后配置”
+        const skipped = localStorage.getItem("vibeworker_skip_onboarding");
+
+        // 如果系统未配置主模型（既不存在于 .env 传统设置中，在 pool assignment 里也没有）
+        const hasLegacyConfig = !!(settings as any).llm_api_key || !!settings.openai_api_key;
+        const hasPoolConfig = !!poolData.assignments?.llm;
+        const configured = hasLegacyConfig || hasPoolConfig;
+
+        setIsModelConfigured(configured);
+
+        if (!configured && skipped !== "true") {
+          setShowOnboarding(true);
+        }
+      } catch (e) {
+        console.error("Failed to check onboarding status:", e);
+      }
+    };
+
+    checkOnboarding();
   }, []);
 
   // Listen for debug toggle from settings dialog
@@ -347,6 +380,8 @@ export default function HomePage() {
           <ChatPanel
             sessionId={currentSessionId}
             onFileOpen={handleFileOpen}
+            isModelConfigured={isModelConfigured}
+            onRequestOnboarding={() => setShowOnboarding(true)}
           />
         </main>
 
@@ -376,6 +411,21 @@ export default function HomePage() {
           </>
         )}
       </div>
+
+      {/* Onboarding Modal - 强制置顶渲染 */}
+      <OnboardingModal
+        open={showOnboarding}
+        onSuccess={(isConfigured: boolean) => {
+          setShowOnboarding(false);
+          if (isConfigured) {
+            // 配置完成后重载状态
+            window.location.reload();
+          } else {
+            // 用户选择跳过，记录在本地防止每次刷新都弹起
+            localStorage.setItem("vibeworker_skip_onboarding", "true");
+          }
+        }}
+      />
     </div>
   );
 }

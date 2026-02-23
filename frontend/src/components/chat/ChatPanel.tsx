@@ -53,6 +53,8 @@ const markdownCodeComponents = {
 interface ChatPanelProps {
     sessionId: string;
     onFileOpen?: (path: string) => void;
+    isModelConfigured?: boolean;
+    onRequestOnboarding?: () => void;
 }
 
 /** Map tool names to friendly Chinese labels with emoji */
@@ -265,6 +267,8 @@ function ToolOutputDisplay({ toolName, output }: { toolName: string; output: str
 export default function ChatPanel({
     sessionId,
     onFileOpen,
+    isModelConfigured = true,
+    onRequestOnboarding,
 }: ChatPanelProps) {
     // Store-driven state
     const { messages, isStreaming, streamingContent, streamingSegments, thinkingSteps, approvalRequest, planApprovalRequest, currentPlan, planFadeOut, planStepTimestamps, planStepActivity, streamingPhase } = useSessionState(sessionId);
@@ -298,11 +302,15 @@ export default function ChatPanel({
     }, [sessionId]);
 
     const handleSend = useCallback(() => {
+        if (!isModelConfigured && onRequestOnboarding) {
+            onRequestOnboarding();
+            return;
+        }
         const text = inputValue.trim();
         if (!text || isStreaming) return;
         setInputValue("");
         sendMessage(text);
-    }, [inputValue, isStreaming, sendMessage]);
+    }, [inputValue, isStreaming, sendMessage, isModelConfigured, onRequestOnboarding]);
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === "Enter" && !e.shiftKey) {
@@ -546,44 +554,44 @@ export default function ChatPanel({
                                                 {msg.tool_calls.map((rawTc, j) => {
                                                     const tc = normalizeToolCall(rawTc);
                                                     return (
-                                                    <div key={j} className="tool-call-card">
-                                                        <div
-                                                            className="tool-call-header"
-                                                            onClick={() => toggleToolExpand(i * 100 + j)}
-                                                        >
-                                                            <div className="w-2 h-2 rounded-full bg-green-500" />
-                                                            <span className="text-xs font-medium text-muted-foreground">
-                                                                {getToolDisplay(tc.tool).icon} {getToolDisplay(tc.tool).label}
-                                                            </span>
-                                                            <span className="text-xs text-muted-foreground/60 truncate flex-1 font-mono">
-                                                                {getToolInputSummary(tc.tool, tc.input)}
-                                                            </span>
-                                                            {tc.cached && (
-                                                                <span title="使用缓存" className="inline-flex">
-                                                                    <Zap className="w-3 h-3 text-muted-foreground/30" />
+                                                        <div key={j} className="tool-call-card">
+                                                            <div
+                                                                className="tool-call-header"
+                                                                onClick={() => toggleToolExpand(i * 100 + j)}
+                                                            >
+                                                                <div className="w-2 h-2 rounded-full bg-green-500" />
+                                                                <span className="text-xs font-medium text-muted-foreground">
+                                                                    {getToolDisplay(tc.tool).icon} {getToolDisplay(tc.tool).label}
                                                                 </span>
-                                                            )}
-                                                            <span className="text-xs text-muted-foreground/40">
-                                                                {expandedTools.has(i * 100 + j) ? "▼" : "▶"}
-                                                            </span>
-                                                        </div>
-                                                        {expandedTools.has(i * 100 + j) && (
-                                                            <div className="tool-call-body animate-fade-in-up">
-                                                                {tc.input && (
-                                                                    <div className="mb-2.5">
-                                                                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-semibold mb-1">输入</div>
-                                                                        <ToolInputDisplay toolName={tc.tool} input={tc.input} />
-                                                                    </div>
+                                                                <span className="text-xs text-muted-foreground/60 truncate flex-1 font-mono">
+                                                                    {getToolInputSummary(tc.tool, tc.input)}
+                                                                </span>
+                                                                {tc.cached && (
+                                                                    <span title="使用缓存" className="inline-flex">
+                                                                        <Zap className="w-3 h-3 text-muted-foreground/30" />
+                                                                    </span>
                                                                 )}
-                                                                {tc.output && (
-                                                                    <div>
-                                                                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-semibold mb-1">输出</div>
-                                                                        <ToolOutputDisplay toolName={tc.tool} output={tc.output} />
-                                                                    </div>
-                                                                )}
+                                                                <span className="text-xs text-muted-foreground/40">
+                                                                    {expandedTools.has(i * 100 + j) ? "▼" : "▶"}
+                                                                </span>
                                                             </div>
-                                                        )}
-                                                    </div>
+                                                            {expandedTools.has(i * 100 + j) && (
+                                                                <div className="tool-call-body animate-fade-in-up">
+                                                                    {tc.input && (
+                                                                        <div className="mb-2.5">
+                                                                            <div className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-semibold mb-1">输入</div>
+                                                                            <ToolInputDisplay toolName={tc.tool} input={tc.input} />
+                                                                        </div>
+                                                                    )}
+                                                                    {tc.output && (
+                                                                        <div>
+                                                                            <div className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-semibold mb-1">输出</div>
+                                                                            <ToolOutputDisplay toolName={tc.tool} output={tc.output} />
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                     );
                                                 })}
                                             </div>
