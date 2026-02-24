@@ -1,6 +1,47 @@
 // background.js
 
+// 记录需要等待用户完成操作的标签页映射关系：targetTabId -> senderApp (Web端)
+const pendingUserActions = new Map();
+
+function injectWaitUIWhenReady(tabId) {
+    const listener = (updatedTabId, info, tab) => {
+        if (updatedTabId === tabId && info.status === 'complete') {
+            chrome.tabs.onUpdated.removeListener(listener);
+            chrome.scripting.executeScript({
+                target: { tabId: tabId },
+                files: ['injected-ui.js']
+            }).catch(e => console.error("Inject UI failed:", e));
+        }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+}
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.type === 'USER_FINISHED_WORK') {
+        const targetTabId = sender.tab?.id;
+        if (targetTabId && pendingUserActions.has(targetTabId)) {
+            const originApp = pendingUserActions.get(targetTabId);
+
+            // 将完成信号转发回原始的发起方（Web端页面）
+            if (originApp.senderTabId) {
+                chrome.tabs.sendMessage(originApp.senderTabId, {
+                    type: 'VIBEWORKER_USER_FINISHED',
+                    payload: { action: 'USER_FINISHED_WORK', targetTabId: targetTabId }
+                }).catch(e => console.log("Failed to send message back to app:", e));
+
+                // 将浏览器焦点自动切回 Web 端页面
+                chrome.tabs.update(originApp.senderTabId, { active: true });
+                if (originApp.senderWindowId) {
+                    chrome.windows.update(originApp.senderWindowId, { focused: true });
+                }
+            }
+
+            pendingUserActions.delete(targetTabId);
+            sendResponse({ status: 'success' });
+        }
+        return true;
+    }
+
     if (request.type === 'VIBEWORKER_EXTENSION_REQUEST') {
         const action = request.payload?.action;
         const targetUrl = request.payload?.url || 'https://github.com'; // Default for testing
@@ -19,6 +60,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
         else if (action === 'OPEN_POPUP') {
             const focused = request.payload?.require_focus !== false; // Default to true
+            const waitForUser = request.payload?.wait_for_user === true;
             chrome.windows.create({
                 url: targetUrl,
                 type: 'popup',
@@ -26,12 +68,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 height: 600,
                 focused: focused
             }, (win) => {
+                let tabId = null;
                 if (win.tabs && win.tabs.length > 0) {
-                    sendResponse({ status: 'success', windowId: win.id, tabId: win.tabs[0].id, message: 'Popup opened.' });
+                    tabId = win.tabs[0].id;
+                }
+
+                const returnResponse = (tId) => {
+                    if (waitForUser && tId) {
+                        pendingUserActions.set(tId, {
+                            senderTabId: sender.tab ? sender.tab.id : null,
+                            senderWindowId: sender.tab ? sender.tab.windowId : null
+                        });
+                        injectWaitUIWhenReady(tId);
+                    }
+                    sendResponse({ status: 'success', windowId: win.id, tabId: tId, waiting_for_user: waitForUser, message: 'Popup opened.' });
+                };
+
+                if (tabId) {
+                    returnResponse(tabId);
                 } else {
                     chrome.tabs.query({ windowId: win.id }, (tabs) => {
-                        const tabId = tabs && tabs.length > 0 ? tabs[0].id : null;
-                        sendResponse({ status: 'success', windowId: win.id, tabId: tabId, message: 'Popup opened.' });
+                        tabId = tabs && tabs.length > 0 ? tabs[0].id : null;
+                        returnResponse(tabId);
                     });
                 }
             });
@@ -39,11 +97,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
         else if (action === 'OPEN_TAB') {
             const active = request.payload?.require_focus !== false; // Default to true
+            const waitForUser = request.payload?.wait_for_user === true;
             chrome.tabs.create({
                 url: targetUrl,
                 active: active
             }, (tab) => {
-                sendResponse({ status: 'success', tabId: tab.id, message: 'Tab opened.' });
+                if (waitForUser && tab.id) {
+                    pendingUserActions.set(tab.id, {
+                        senderTabId: sender.tab ? sender.tab.id : null,
+                        senderWindowId: sender.tab ? sender.tab.windowId : null
+                    });
+                    injectWaitUIWhenReady(tab.id);
+                }
+                sendResponse({ status: 'success', tabId: tab.id, waiting_for_user: waitForUser, message: 'Tab opened.' });
             });
             return true; // Keep channel open for async response
         }

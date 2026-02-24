@@ -28,3 +28,14 @@ window.addEventListener('message', (event) => {
         });
     }
 });
+
+// Listen for messages from the extension background and forward to Web App
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.type === 'VIBEWORKER_USER_FINISHED') {
+        console.log('Content Bridge received VIBEWORKER_USER_FINISHED from background:', request);
+        window.postMessage({
+            type: 'VIBEWORKER_EXTENSION_RESPONSE',
+            payload: request.payload
+        }, '*');
+    }
+});

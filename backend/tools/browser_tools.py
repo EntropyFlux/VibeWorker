@@ -60,19 +60,20 @@ class BrowserGate:
 browser_gate = BrowserGate()
 
 @tool
-async def browser_open(url: str, require_focus: bool = True) -> Dict[str, Any]:
+async def browser_open(url: str, require_focus: bool = True, wait_for_user: bool = False) -> Dict[str, Any]:
     """
     Open a webpage in the browser extension.
 
-    IMPORTANT PROMPT INSTRUCTIONS FOR `require_focus`:
-    - Set `require_focus=False` (Background/Silent mode) when you only need to open the page to read/extract content or perform automated actions that do not require the user's attention. This prevents interrupting the user's workflow.
-    - Set `require_focus=True` (Foreground/Active mode) ONLY when the user explicitly needs to see the page, or when you encounter an interactive scenario (like a CAPTCHA or complex login) that requires manual user intervention, or if you want to visually present the final result to the user.
+    IMPORTANT PROMPT INSTRUCTIONS FOR `require_focus` & `wait_for_user`:
+    - Set `require_focus=False` (Background/Silent mode) when you only need to open the page to read/extract content or perform automated actions that do not require the user's attention. This prevents interrupting the user's workflow. `wait_for_user` MUST be False in this case.
+    - Set `require_focus=True` (Foreground/Active mode) ONLY when the user explicitly needs to see the page, or when you want to visually present the final result to the user.
+    - Set `wait_for_user=True` (ONLY valid if require_focus=True) when you encounter a scenario that requires manual user intervention before you can proceed (like a complex login, solving a CAPTCHA, or authenticating via a QR code). The system will inject a "Finish Work" button into the page and pause execution until the user clicks it.
 
     IMPORTANT USAGE NOTE:
     - If you are trying to read a URL using standard fetching tools (like `fetch_url`) and it fails, times out, or returns a block/CAPTCHA page, you should FALLBACK to this tool.
     - Open the page using `browser_open(..., require_focus=False)`, then use `browser_read` to extract the content, and finally `browser_close`.
     """
-    return await browser_gate.wait_for_callback("OPEN", {"url": url, "require_focus": require_focus})
+    return await browser_gate.wait_for_callback("OPEN", {"url": url, "require_focus": require_focus, "wait_for_user": wait_for_user})
 
 @tool
 async def browser_read() -> Dict[str, Any]:

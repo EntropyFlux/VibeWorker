@@ -737,6 +737,31 @@ class SessionStore {
                   this.updateSession(sessionId, { agentTabs: [...tabs, responseMap.tabId] });
                 }
 
+                if (action === "OPEN" && responseMap?.waiting_for_user) {
+                  // If the extension tells us it's waiting for the user, 
+                  // we DO NOT resolve the backend callback yet.
+                  // We remove the current listener and attach a new one for the FINISHED event.
+                  console.log("Tab opened, waiting for user to finish work...");
+                  window.removeEventListener('message', listener);
+
+                  const finishListener = async (finishEvent: MessageEvent) => {
+                    if (
+                      finishEvent.data?.type === 'VIBEWORKER_EXTENSION_RESPONSE' &&
+                      finishEvent.data.payload?.action === 'USER_FINISHED_WORK'
+                    ) {
+                      console.log("User finished interaction, resuming agent...");
+                      try {
+                        await sendBrowserCallback(requestId, { status: "success", message: "User finished manually interacting with the page." });
+                      } catch (e) {
+                        console.error("Failed to send browser callback", e);
+                      }
+                      window.removeEventListener('message', finishListener);
+                    }
+                  };
+                  window.addEventListener('message', finishListener);
+                  return; // Exit early so we don't send the callback below
+                }
+
                 try {
                   await sendBrowserCallback(requestId, responseMap);
                 } catch (e) {
