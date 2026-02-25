@@ -313,6 +313,7 @@ export default function ChatPanel({
     }, [inputValue, isStreaming, sendMessage, isModelConfigured, onRequestOnboarding]);
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.nativeEvent.isComposing) return;
         if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             handleSend();
