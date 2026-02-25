@@ -74,7 +74,11 @@ export default function InspectorPanel({
             setOriginalContent(fileContent);
             setHasChanges(false);
         } catch (err) {
-            setContent(`// Error loading file: ${err}`);
+            if (path.includes(".claude/skills")) {
+                setContent(`// 无法直接在编辑器中打开外部文件: ${path}\n// 由于安全沙箱限制，暂且无法直接读取或修改该文件。\n// 这是一个来自于 Claude Code 的技能，请直接呼出该终端或使用您顺手的编辑器打开此目录修改它。`);
+            } else {
+                setContent(`// Error loading file: ${err}`);
+            }
         }
         setIsLoading(false);
     };
@@ -307,48 +311,48 @@ export default function InspectorPanel({
                     </div>
                 ) : (
                     <>
-                    {/* Translation loading overlay */}
-                    {isTranslating && (
-                        <div className="absolute inset-0 bg-background/80 backdrop-blur-sm z-10 flex flex-col items-center justify-center gap-3">
-                            <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-                            <span className="text-sm text-muted-foreground">正在翻译中，请稍候...</span>
-                            {translateModel && (
-                                <span className="text-xs text-muted-foreground/70">
-                                    使用模型: <span className="font-mono text-blue-500">{translateModel}</span>
-                                </span>
-                            )}
-                        </div>
-                    )}
-                    <MonacoEditor
-                        height="100%"
-                        language={getLanguage(filePath)}
-                        value={content}
-                        onChange={handleEditorChange}
-                        theme="vs"
-                        options={{
-                            minimap: { enabled: false },
-                            fontSize: 13,
-                            lineHeight: 20,
-                            padding: { top: 12 },
-                            wordWrap: "on",
-                            fontFamily: "'JetBrains Mono', 'Cascadia Code', Consolas, monospace",
-                            fontLigatures: true,
-                            scrollBeyondLastLine: false,
-                            smoothScrolling: true,
-                            cursorBlinking: "smooth",
-                            cursorSmoothCaretAnimation: "on",
-                            renderLineHighlight: "none",
-                            overviewRulerLanes: 0,
-                            hideCursorInOverviewRuler: true,
-                            overviewRulerBorder: false,
-                            scrollbar: {
-                                vertical: "auto",
-                                horizontal: "auto",
-                                verticalScrollbarSize: 6,
-                                horizontalScrollbarSize: 6,
-                            },
-                        }}
-                    />
+                        {/* Translation loading overlay */}
+                        {isTranslating && (
+                            <div className="absolute inset-0 bg-background/80 backdrop-blur-sm z-10 flex flex-col items-center justify-center gap-3">
+                                <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+                                <span className="text-sm text-muted-foreground">正在翻译中，请稍候...</span>
+                                {translateModel && (
+                                    <span className="text-xs text-muted-foreground/70">
+                                        使用模型: <span className="font-mono text-blue-500">{translateModel}</span>
+                                    </span>
+                                )}
+                            </div>
+                        )}
+                        <MonacoEditor
+                            height="100%"
+                            language={getLanguage(filePath)}
+                            value={content}
+                            onChange={handleEditorChange}
+                            theme="vs"
+                            options={{
+                                minimap: { enabled: false },
+                                fontSize: 13,
+                                lineHeight: 20,
+                                padding: { top: 12 },
+                                wordWrap: "on",
+                                fontFamily: "'JetBrains Mono', 'Cascadia Code', Consolas, monospace",
+                                fontLigatures: true,
+                                scrollBeyondLastLine: false,
+                                smoothScrolling: true,
+                                cursorBlinking: "smooth",
+                                cursorSmoothCaretAnimation: "on",
+                                renderLineHighlight: "none",
+                                overviewRulerLanes: 0,
+                                hideCursorInOverviewRuler: true,
+                                overviewRulerBorder: false,
+                                scrollbar: {
+                                    vertical: "auto",
+                                    horizontal: "auto",
+                                    verticalScrollbarSize: 6,
+                                    horizontalScrollbarSize: 6,
+                                },
+                            }}
+                        />
                     </>
                 )}
             </div>

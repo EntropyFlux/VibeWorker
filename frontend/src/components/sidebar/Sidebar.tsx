@@ -418,15 +418,24 @@ export default function Sidebar({
                                     >
                                         <Puzzle className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
                                         <div className="flex-1 min-w-0">
-                                            <div className="font-medium break-words">{skill.name}</div>
+                                            <div className="font-medium break-words flex items-center gap-2">
+                                                {skill.name}
+                                                {skill.source === "claude_code" && (
+                                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-accent text-muted-foreground shrink-0 border border-border/50">
+                                                        Claude Code
+                                                    </span>
+                                                )}
+                                            </div>
                                             <div className="text-xs text-muted-foreground/60 break-words line-clamp-2">
                                                 {skill.description}
                                             </div>
                                         </div>
-                                        <Trash2
-                                            className="w-3.5 h-3.5 mt-0.5 opacity-0 group-hover:opacity-40 hover:!opacity-100 hover:text-destructive shrink-0 transition-opacity cursor-pointer"
-                                            onClick={(e) => handleDeleteSkill(e, skill.name)}
-                                        />
+                                        {skill.source !== "claude_code" && (
+                                            <Trash2
+                                                className="w-3.5 h-3.5 mt-0.5 opacity-0 group-hover:opacity-40 hover:!opacity-100 hover:text-destructive shrink-0 transition-opacity cursor-pointer"
+                                                onClick={(e) => handleDeleteSkill(e, skill.name)}
+                                            />
+                                        )}
                                     </button>
                                 ))}
                             </div>

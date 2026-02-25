@@ -42,6 +42,7 @@ export interface Skill {
   name: string;
   description: string;
   location: string;
+  source?: string;
 }
 
 export interface FileNode {
@@ -1068,6 +1069,7 @@ export interface McpServerConfig {
   headers?: Record<string, string>;
   enabled: boolean;
   description: string;
+  source?: string;
 }
 
 export interface McpServerInfo extends McpServerConfig {

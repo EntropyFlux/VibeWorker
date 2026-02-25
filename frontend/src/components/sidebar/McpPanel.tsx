@@ -230,16 +230,17 @@ export default function McpPanel({ onFileOpen }: McpPanelProps) {
                 const statusColor = STATUS_COLORS[info.status] || STATUS_COLORS.disconnected;
                 const statusLabel = STATUS_LABELS[info.status] || info.status;
                 const isConnected = info.status === "connected";
+                const isExternal = info.source === "claude_desktop" || info.source === "claude_code";
+                const externalLabel = info.source === "claude_desktop" ? "Claude Desktop" : (info.source === "claude_code" ? "Claude Code" : "");
 
                 return (
                     <div key={name}>
                         {/* Server header */}
                         <button
-                            className={`w-full text-left px-3 py-2 rounded-xl text-sm transition-all duration-150 flex items-center gap-2 group ${
-                                isExpanded
+                            className={`w-full text-left px-3 py-2 rounded-xl text-sm transition-all duration-150 flex items-center gap-2 group ${isExpanded
                                     ? "bg-primary/10 text-primary"
                                     : "hover:bg-accent text-foreground/70"
-                            }`}
+                                }`}
                             onClick={() => handleExpand(name)}
                         >
                             {isExpanded ? (
@@ -251,6 +252,11 @@ export default function McpPanel({ onFileOpen }: McpPanelProps) {
                             <span className="flex-1 min-w-0 truncate font-medium text-xs">
                                 {name}
                             </span>
+                            {isExternal && (
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-accent text-muted-foreground shrink-0 border border-border/50">
+                                    {externalLabel}
+                                </span>
+                            )}
                             {isConnected && (
                                 <span className="text-[10px] text-muted-foreground/50 shrink-0">
                                     {info.tools_count}
@@ -306,24 +312,28 @@ export default function McpPanel({ onFileOpen }: McpPanelProps) {
                                             连接
                                         </Button>
                                     )}
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-6 px-2 text-[10px]"
-                                        onClick={(e) => handleEdit(e, name)}
-                                    >
-                                        <Pencil className="w-3 h-3 mr-1" />
-                                        编辑
-                                    </Button>
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-6 px-2 text-[10px] text-destructive hover:text-destructive"
-                                        onClick={(e) => handleDelete(e, name)}
-                                    >
-                                        <Trash2 className="w-3 h-3 mr-1" />
-                                        删除
-                                    </Button>
+                                    {!isExternal && (
+                                        <>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-6 px-2 text-[10px]"
+                                                onClick={(e) => handleEdit(e, name)}
+                                            >
+                                                <Pencil className="w-3 h-3 mr-1" />
+                                                编辑
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-6 px-2 text-[10px] text-destructive hover:text-destructive"
+                                                onClick={(e) => handleDelete(e, name)}
+                                            >
+                                                <Trash2 className="w-3 h-3 mr-1" />
+                                                删除
+                                            </Button>
+                                        </>
+                                    )}
                                 </div>
 
                                 {/* Tools list */}

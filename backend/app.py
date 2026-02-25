@@ -858,11 +858,19 @@ async def generate_session_title(session_id: str):
 @app.get("/api/skills")
 async def list_skills():
     """List all available skills."""
-    from prompt_builder import generate_skills_snapshot, _parse_skill_frontmatter
+    from prompt_builder import generate_skills_snapshot, _parse_skill_frontmatter, _detect_claude_code_skills
 
     skills = []
-    if settings.skills_dir.exists():
-        for skill_dir in sorted(settings.skills_dir.iterdir()):
+    skills_dirs = [settings.skills_dir]
+    
+    claude_code_dir = _detect_claude_code_skills()
+    if claude_code_dir:
+        skills_dirs.append(claude_code_dir)
+
+    for base_dir in skills_dirs:
+        if not base_dir.exists():
+            continue
+        for skill_dir in sorted(base_dir.iterdir()):
             if not skill_dir.is_dir():
                 continue
             skill_md = skill_dir / "SKILL.md"
@@ -871,14 +879,22 @@ async def list_skills():
             name, description = _parse_skill_frontmatter(skill_md)
             if not name:
                 name = skill_dir.name
+            
+            # Use relative path from data_dir first, fallback to PROJECT_ROOT, then raw
             try:
                 rel_path = str(skill_md.relative_to(settings.get_data_path())).replace("\\", "/")
             except ValueError:
-                rel_path = str(skill_md.relative_to(PROJECT_ROOT)).replace("\\", "/")
+                try:
+                    rel_path = str(skill_md.relative_to(PROJECT_ROOT)).replace("\\", "/")
+                except ValueError:
+                    rel_path = str(skill_md).replace("\\", "/")
+            source = "claude_code" if base_dir == claude_code_dir else "local"
+                    
             skills.append({
                 "name": name,
                 "description": description,
                 "location": rel_path,
+                "source": source,
             })
 
     return {"skills": skills}

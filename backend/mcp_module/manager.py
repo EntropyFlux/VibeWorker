@@ -10,7 +10,7 @@ from typing import Any
 
 from langchain_core.tools import StructuredTool
 
-from mcp_module.config import load_config, get_server
+from mcp_module.config import get_active_config, get_server
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ class MCPManager:
 
     async def initialize(self) -> None:
         """Connect to all enabled MCP servers on startup."""
-        config = load_config()
+        config = get_active_config()
         servers = config.get("servers", {})
         for name, srv_config in servers.items():
             if srv_config.get("enabled", True):
@@ -199,7 +199,7 @@ class MCPManager:
 
     def get_server_status(self) -> dict[str, dict[str, Any]]:
         """Return status info for all known servers."""
-        config = load_config()
+        config = get_active_config()
         result = {}
         for name, srv_config in config.get("servers", {}).items():
             conn = self._connections.get(name, {})
