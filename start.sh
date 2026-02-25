@@ -49,7 +49,7 @@ start_backend() {
     log_info "启动后端服务..."
     cd "$BACKEND_DIR"
 
-    # 激活虚拟环境（如果存在）
+    # 激活虚拟环境或创建
     if [[ -f "venv/Scripts/activate" ]]; then
         source venv/Scripts/activate
     elif [[ -f "venv/bin/activate" ]]; then
@@ -58,6 +58,23 @@ start_backend() {
         source .venv/Scripts/activate
     elif [[ -f ".venv/bin/activate" ]]; then
         source .venv/bin/activate
+    else
+        log_info "未检测到虚拟环境，正在创建 venv..."
+        if command -v python3 &>/dev/null; then
+            python3 -m venv venv
+        else
+            python -m venv venv
+        fi
+        
+        if [[ -f "venv/Scripts/activate" ]]; then
+            source venv/Scripts/activate
+        else
+            source venv/bin/activate
+        fi
+        
+        log_info "正在安装后端依赖，这可能需要一些时间..."
+        pip install --upgrade pip
+        pip install -r requirements.txt
     fi
 
     nohup python app.py > "$PID_DIR/backend.log" 2>&1 &
@@ -83,6 +100,11 @@ start_frontend() {
 
     log_info "启动前端服务..."
     cd "$FRONTEND_DIR"
+
+    if [[ ! -d "node_modules" ]]; then
+        log_info "未检测到前端依赖，正在使用 npm 安装..."
+        npm install
+    fi
 
     nohup npm run dev > "$PID_DIR/frontend.log" 2>&1 &
     local new_pid=$!

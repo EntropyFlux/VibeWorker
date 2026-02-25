@@ -34,6 +34,13 @@ if exist "venv\Scripts\activate.bat" (
     call venv\Scripts\activate.bat
 ) else if exist ".venv\Scripts\activate.bat" (
     call .venv\Scripts\activate.bat
+) else (
+    echo [INFO] 未检测到虚拟环境，正在创建 venv...
+    python -m venv venv
+    call venv\Scripts\activate.bat
+    echo [INFO] 正在安装后端依赖，这可能需要一些时间...
+    python -m pip install --upgrade pip
+    pip install -r requirements.txt
 )
 
 start "VibeWorker-Backend" /min cmd /c "python app.py"
@@ -42,6 +49,11 @@ echo [INFO] 后端启动中... http://localhost:%BACKEND_PORT%
 :: 启动前端
 echo [INFO] 启动前端服务...
 cd /d "%FRONTEND_DIR%"
+
+if not exist "node_modules\" (
+    echo [INFO] 未检测到前端依赖，正在使用 npm 安装...
+    call npm install
+)
 start "VibeWorker-Frontend" /min cmd /c "npm run dev"
 echo [INFO] 前端启动中... http://localhost:%FRONTEND_PORT%
 
