@@ -33,6 +33,9 @@ const RIGHT_MIN = 280;
 const RIGHT_MAX = 600;
 const RIGHT_DEFAULT = 384;
 
+// 预期的扩展程序版本
+const EXPECTED_EXTENSION_VERSION = "0.1.1";
+
 // localStorage 键名
 const STORAGE_KEY_LEFT_WIDTH = "vibeworker_left_width";
 const STORAGE_KEY_RIGHT_WIDTH = "vibeworker_right_width";
@@ -45,6 +48,7 @@ export default function HomePage() {
   const [isBackendOnline, setIsBackendOnline] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
   const [isExtensionOnline, setIsExtensionOnline] = useState(false);
+  const [extensionVersion, setExtensionVersion] = useState<string | null>(null);
   const [showExtensionDialog, setShowExtensionDialog] = useState(false);
 
   // Onboarding 状态
@@ -180,6 +184,9 @@ export default function HomePage() {
           isWaiting = false;
           clearTimeout(timeoutId);
           setIsExtensionOnline(true);
+          if (event.data.payload.version) {
+            setExtensionVersion(event.data.payload.version);
+          }
         }
       }
     };
@@ -355,23 +362,31 @@ export default function HomePage() {
             <TooltipTrigger asChild>
               <div
                 onClick={() => {
-                  if (!isExtensionOnline) {
+                  if (!isExtensionOnline || (extensionVersion && extensionVersion < EXPECTED_EXTENSION_VERSION)) {
                     setShowExtensionDialog(true);
                   }
                 }}
-                className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-medium transition-colors ${isExtensionOnline
-                  ? "text-green-600 bg-green-50"
-                  : "text-destructive bg-destructive/10 cursor-pointer hover:bg-destructive/20 animate-pulse"
+                className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-medium transition-colors ${!isExtensionOnline
+                    ? "text-destructive bg-destructive/10 cursor-pointer hover:bg-destructive/20 animate-pulse"
+                    : extensionVersion && extensionVersion < EXPECTED_EXTENSION_VERSION
+                      ? "text-amber-600 bg-amber-50 cursor-pointer hover:bg-amber-100 animate-pulse"
+                      : "text-green-600 bg-green-50"
                   }`}
               >
                 <Puzzle className="w-3 h-3" />
-                {isExtensionOnline ? "插件就绪" : "未安装插件"}
+                {!isExtensionOnline
+                  ? "未安装插件"
+                  : extensionVersion && extensionVersion < EXPECTED_EXTENSION_VERSION
+                    ? "需升级插件"
+                    : "插件就绪"}
               </div>
             </TooltipTrigger>
             <TooltipContent>
-              {isExtensionOnline
-                ? "浏览器插件运行正常，能力已完全解锁"
-                : "点击查看如何安装浏览器插件"}
+              {!isExtensionOnline
+                ? "点击查看如何安装浏览器插件"
+                : extensionVersion && extensionVersion < EXPECTED_EXTENSION_VERSION
+                  ? `当前插件版本 (${extensionVersion}) 需要升级到最新版本 (${EXPECTED_EXTENSION_VERSION})，点击查看如何升级`
+                  : "浏览器插件运行正常，能力已完全解锁"}
             </TooltipContent>
           </Tooltip>
 
@@ -511,9 +526,11 @@ export default function HomePage() {
         }}
       />
 
+      {/* Extension Install/Upgrade Dialog */}
       <ExtensionInstallDialog
         open={showExtensionDialog}
         onOpenChange={setShowExtensionDialog}
+        isUpgrade={isExtensionOnline && extensionVersion !== null && extensionVersion < EXPECTED_EXTENSION_VERSION}
       />
     </div>
   );

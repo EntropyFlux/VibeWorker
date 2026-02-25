@@ -59,7 +59,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             sendResponse({ status: 'success', message: 'PING received.' });
         }
         else if (action === 'HEALTH_CHECK') {
-            sendResponse({ status: 'success', message: 'Extension is healthy.' });
+            const manifest = chrome.runtime.getManifest();
+            sendResponse({ status: 'success', message: 'Extension is healthy.', version: manifest.version });
             return true;
         }
         else if (action === 'OPEN_POPUP') {

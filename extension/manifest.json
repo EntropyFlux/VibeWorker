@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "VibeWorker Extension",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "An extension to allow VibeWorker to interact with the browser.",
   "permissions": [
     "activeTab",

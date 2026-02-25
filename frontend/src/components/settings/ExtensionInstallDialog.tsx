@@ -7,16 +7,18 @@ import {
     DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Download, Puzzle, Settings, CheckCircle2 } from "lucide-react";
+import { Puzzle, Settings, CheckCircle2 } from "lucide-react";
 
 interface ExtensionInstallDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
+    isUpgrade?: boolean;
 }
 
 export default function ExtensionInstallDialog({
     open,
     onOpenChange,
+    isUpgrade = false
 }: ExtensionInstallDialogProps) {
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -24,10 +26,13 @@ export default function ExtensionInstallDialog({
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                         <Puzzle className="w-5 h-5 text-primary" />
-                        安装 VibeWorker 浏览器插件
+                        {isUpgrade ? "升级 VibeWorker 浏览器插件" : "安装 VibeWorker 浏览器插件"}
                     </DialogTitle>
                     <DialogDescription>
-                        安装插件后，VibeWorker Agent 才能体验完整的功能（例如：填写表单、提取网页内容等）。请按照以下步骤完成安装：
+                        {isUpgrade
+                            ? "发现新版本的插件。为了体验完整的最新功能，请按照以下步骤完成升级："
+                            : "安装插件后，VibeWorker Agent 才能体验完整的功能（例如：填写表单、提取网页内容等）。请按照以下步骤完成安装："
+                        }
                     </DialogDescription>
                 </DialogHeader>
 
