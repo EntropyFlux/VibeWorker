@@ -183,6 +183,7 @@ export default function Sidebar({
     const [skills, setSkills] = useState<Skill[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [storeOpen, setStoreOpen] = useState(false);
+    const [isExpandedMap, setIsExpandedMap] = useState<Record<string, boolean>>({});
 
     // Fetch sessions
     useEffect(() => {
@@ -426,7 +427,17 @@ export default function Sidebar({
                                                     </span>
                                                 )}
                                             </div>
-                                            <div className="text-xs text-muted-foreground/60 break-words line-clamp-2">
+                                            <div
+                                                className={`text-xs text-muted-foreground/60 break-words cursor-text ${isExpandedMap[skill.name] ? "" : "line-clamp-2"
+                                                    }`}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setIsExpandedMap(prev => ({
+                                                        ...prev,
+                                                        [skill.name]: !prev[skill.name]
+                                                    }));
+                                                }}
+                                            >
                                                 {skill.description}
                                             </div>
                                         </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { Download, Star, Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -37,9 +37,15 @@ export default function SkillCard({
   onSelect,
   isInstalling = false,
 }: SkillCardProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
   const handleInstall = async (e: React.MouseEvent) => {
     e.stopPropagation();
     await onInstall(skill.name);
+  };
+
+  const toggleExpand = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsExpanded(!isExpanded);
   };
 
   return (
@@ -62,7 +68,12 @@ export default function SkillCard({
               {CATEGORY_LABELS[skill.category] || skill.category}
             </Badge>
           </div>
-          <p className="text-sm text-muted-foreground line-clamp-2 mb-2">
+          <p
+            className={`text-sm text-muted-foreground mb-2 cursor-text ${
+              isExpanded ? "" : "line-clamp-2"
+            }`}
+            onClick={toggleExpand}
+          >
             {skill.description}
           </p>
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
