@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Optional
 import logging
 import platform
+from xml.sax.saxutils import escape as xml_escape
 
 from config import settings, PROJECT_ROOT, read_text_smart
 
@@ -96,10 +97,15 @@ def generate_skills_snapshot() -> str:
                     rel_path = skill_md.relative_to(PROJECT_ROOT)
                 except ValueError:
                     rel_path = skill_md
+            # 安全修复：对 XML 内容进行转义，防止 XML 注入
+            # 如果技能名或描述包含 <、>、& 等字符，可能破坏 XML 结构
+            safe_name = xml_escape(name)
+            safe_desc = xml_escape(description)
+            safe_loc = xml_escape(str(rel_path))
             skills_xml += f"  <skill>\n"
-            skills_xml += f"    <name>{name}</name>\n"
-            skills_xml += f"    <description>{description}</description>\n"
-            skills_xml += f"    <location>./{rel_path}</location>\n"
+            skills_xml += f"    <name>{safe_name}</name>\n"
+            skills_xml += f"    <description>{safe_desc}</description>\n"
+            skills_xml += f"    <location>./{safe_loc}</location>\n"
             skills_xml += f"  </skill>\n"
 
     skills_xml += "</available_skills>"

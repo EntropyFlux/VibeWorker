@@ -524,13 +524,33 @@ async def _do_session_reflect(session_id: str, tool_calls_log: list) -> None:
 # 计划审批端点
 # ============================================
 
-# 全局注册表：plan_id → RunContext.approval_queue（由 runner 注册）
-_plan_approval_contexts: dict[str, asyncio.Queue] = {}
+# 全局注册表：plan_id → (queue, timestamp)（由 runner 注册）
+# 添加时间戳用于过期清理，防止内存泄漏
+import time
+_plan_approval_contexts: dict[str, tuple[asyncio.Queue, float]] = {}
+_PLAN_APPROVAL_TIMEOUT = 600  # 10 分钟过期
 
 
 def register_plan_approval_context(plan_id: str, queue: asyncio.Queue) -> None:
-    """注册计划审批上下文（由 runner 在 interrupt 时调用）。"""
-    _plan_approval_contexts[plan_id] = queue
+    """注册计划审批上下文（由 runner 在 interrupt 时调用）。
+
+    内存安全：添加时间戳，配合清理机制防止内存泄漏。
+    """
+    # 先清理过期条目
+    _cleanup_expired_plan_contexts()
+    _plan_approval_contexts[plan_id] = (queue, time.time())
+
+
+def _cleanup_expired_plan_contexts() -> None:
+    """清理过期的计划审批上下文，防止内存泄漏。"""
+    now = time.time()
+    expired = [
+        plan_id for plan_id, (_, ts) in _plan_approval_contexts.items()
+        if now - ts > _PLAN_APPROVAL_TIMEOUT
+    ]
+    for plan_id in expired:
+        _plan_approval_contexts.pop(plan_id, None)
+        logger.debug(f"清理过期的计划审批上下文: {plan_id}")
 
 
 class PlanApprovalRequest(BaseModel):
@@ -541,8 +561,9 @@ class PlanApprovalRequest(BaseModel):
 @app.post("/api/plan/approve")
 async def approve_plan(request: PlanApprovalRequest):
     """审批或拒绝待执行的计划。"""
-    queue = _plan_approval_contexts.pop(request.plan_id, None)
-    if queue is not None:
+    entry = _plan_approval_contexts.pop(request.plan_id, None)
+    if entry is not None:
+        queue, _ = entry  # 解构 (queue, timestamp) 元组
         await queue.put({"approved": request.approved})
         return {"status": "ok", "plan_id": request.plan_id, "approved": request.approved}
     else:

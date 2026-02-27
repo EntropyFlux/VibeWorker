@@ -529,7 +529,6 @@ class SessionStore {
             }
             // Add LLM call to debugCalls immediately when it starts (for real-time display)
             if (debugEnabled) {
-              console.log("[llm_start] node:", event.node, "call_id:", event.call_id, "input.length:", event.input?.length);
               const calls = this.getState(sessionId).debugCalls;
               this.updateSession(sessionId, {
                 debugCalls: [...calls, {
@@ -558,13 +557,11 @@ class SessionStore {
           case "llm_end": {
             // Update the in-progress LLM call with final data
             if (debugEnabled) {
-              console.log("[llm_end] node:", event.node, "call_id:", event.call_id, "input.length:", event.input?.length);
               const calls = this.getState(sessionId).debugCalls.slice();
               // Find the last in-progress call for this call_id
               for (let i = calls.length - 1; i >= 0; i--) {
                 const call = calls[i];
                 if (isLLMCall(call) && call.call_id === event.call_id && call._inProgress) {
-                  console.log("[llm_end] Found match! Old input.length:", call.input?.length, "New input.length:", (event.input || call.input)?.length);
                   // 提取扩展字段（SSEEvent 类型中未定义的字段）
                   const rawEvent = event as SSEEvent & {
                     tokens_estimated?: boolean;
@@ -738,10 +735,9 @@ class SessionStore {
                 }
 
                 if (action === "OPEN" && responseMap?.waiting_for_user) {
-                  // If the extension tells us it's waiting for the user, 
+                  // If the extension tells us it's waiting for the user,
                   // we DO NOT resolve the backend callback yet.
                   // We remove the current listener and attach a new one for the FINISHED event.
-                  console.log("Tab opened, waiting for user to finish work...");
                   window.removeEventListener('message', listener);
 
                   const finishListener = async (finishEvent: MessageEvent) => {
@@ -749,7 +745,6 @@ class SessionStore {
                       finishEvent.data?.type === 'VIBEWORKER_EXTENSION_RESPONSE' &&
                       finishEvent.data.payload?.action === 'USER_FINISHED_WORK'
                     ) {
-                      console.log("User finished interaction, resuming agent...");
                       try {
                         await sendBrowserCallback(requestId, { status: "success", message: "User finished manually interacting with the page." });
                       } catch (e) {

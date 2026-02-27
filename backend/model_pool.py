@@ -2,11 +2,14 @@
 
 Maintains a pool of model configurations in ~/.vibeworker/model_pool.json.
 Each scenario (llm, embedding, translate) references a pool entry by ID.
+
+并发安全增强：使用锁保护缓存和文件操作。
 """
 import json
 import logging
 import os
 import tempfile
+import threading
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -14,6 +17,9 @@ from typing import Optional
 from config import settings
 
 logger = logging.getLogger(__name__)
+
+# 并发保护锁
+_pool_lock = threading.Lock()
 
 # In-memory cache
 _pool_cache: Optional[dict] = None
@@ -44,54 +50,94 @@ def _empty_pool() -> dict:
 
 
 def load_pool() -> dict:
-    """Load model pool from JSON file. Auto-migrate from .env on first access."""
+    """Load model pool from JSON file. Auto-migrate from .env on first access.
+
+    线程安全：使用锁保护缓存读写。
+    """
     global _pool_cache
-    if _pool_cache is not None:
-        return _pool_cache
 
-    path = _pool_path()
-    if path.exists():
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            _pool_cache = data
-            return data
-        except Exception as e:
-            logger.error(f"Failed to load model pool: {e}")
-            return _empty_pool()
+    with _pool_lock:
+        if _pool_cache is not None:
+            # 返回深拷贝防止外部修改污染缓存
+            import copy
+            return copy.deepcopy(_pool_cache)
 
-    # File doesn't exist — try migration from .env
-    pool = _maybe_migrate_from_env()
-    _pool_cache = pool
-    return pool
+        path = _pool_path()
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                _pool_cache = data
+                import copy
+                return copy.deepcopy(data)
+            except Exception as e:
+                logger.error(f"Failed to load model pool: {e}")
+                return _empty_pool()
+
+        # File doesn't exist — try migration from .env
+        pool = _maybe_migrate_from_env()
+        _pool_cache = pool
+        import copy
+        return copy.deepcopy(pool)
 
 
 def save_pool(pool: dict) -> None:
-    """Atomically write pool to JSON file."""
+    """Atomically write pool to JSON file.
+
+    安全增强：使用备份机制防止 Windows 上 unlink-rename 之间的数据丢失窗口。
+    流程：写临时文件 → 备份原文件 → 删除原文件 → 重命名临时文件
+    如果最后一步失败，可从备份恢复。
+    """
     global _pool_cache
     path = _pool_path()
+    backup_path = path.with_suffix(".json.bak")
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Atomic write via temp file
+    tmp_path = None
     try:
         fd, tmp_path = tempfile.mkstemp(
             dir=str(path.parent), suffix=".tmp", prefix="model_pool_"
         )
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(pool, f, ensure_ascii=False, indent=2)
-        # On Windows, need to remove target first
+
+        # 先创建备份（如果原文件存在）
+        if path.exists():
+            try:
+                import shutil
+                shutil.copy2(path, backup_path)
+            except Exception as e:
+                logger.warning(f"Failed to create backup: {e}")
+
+        # Windows 上需要先删除目标文件
         if path.exists():
             path.unlink()
+
+        # 重命名临时文件为目标文件
         Path(tmp_path).rename(path)
+        tmp_path = None  # 标记已处理，防止 finally 中重复删除
+
         _pool_cache = pool
         logger.info("Model pool saved successfully")
+
     except Exception as e:
         logger.error(f"Failed to save model pool: {e}")
-        # Clean up temp file on failure
-        try:
-            Path(tmp_path).unlink(missing_ok=True)
-        except Exception:
-            pass
+        # 如果目标文件不存在但备份存在，尝试恢复
+        if not path.exists() and backup_path.exists():
+            try:
+                import shutil
+                shutil.copy2(backup_path, path)
+                logger.info("Restored model pool from backup")
+            except Exception:
+                pass
         raise
+
+    finally:
+        # 清理临时文件
+        if tmp_path:
+            try:
+                Path(tmp_path).unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 def _maybe_migrate_from_env() -> dict:

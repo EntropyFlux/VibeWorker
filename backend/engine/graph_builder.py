@@ -2,10 +2,15 @@
 
 根据 graph_config.yaml 配置控制哪些节点添加、边如何连接。
 编译后的图通过内容指纹缓存，配置不变时复用。
+
+内存管理增强：
+- MemorySaver 的 checkpoint 数据会随会话增长而无限累积
+- 添加定期清理机制，限制每个 thread 最多保留的 checkpoint 数量
 """
 import hashlib
 import json
 import logging
+import time
 from functools import lru_cache
 from typing import Optional
 
@@ -37,6 +42,69 @@ _graph_cache: dict[str, tuple] = {}
 
 # 全局 checkpointer（用于 interrupt/resume）
 _checkpointer = MemorySaver()
+
+# Checkpoint 清理配置
+_CHECKPOINT_MAX_PER_THREAD = 20  # 每个 thread 最多保留的 checkpoint 数量
+_CHECKPOINT_CLEANUP_INTERVAL = 300  # 清理间隔（秒）
+_last_checkpoint_cleanup = 0.0
+
+
+def cleanup_old_checkpoints() -> int:
+    """清理旧的 checkpoint 数据，防止内存无限增长。
+
+    MemorySaver 使用内部的 storage dict 存储所有 checkpoint。
+    每个 thread_id 可能有多个 checkpoint（每次节点转换都会创建）。
+    这里清理超过限制数量的旧 checkpoint。
+
+    Returns:
+        清理的 checkpoint 数量
+    """
+    global _last_checkpoint_cleanup
+
+    now = time.time()
+    if now - _last_checkpoint_cleanup < _CHECKPOINT_CLEANUP_INTERVAL:
+        return 0
+
+    _last_checkpoint_cleanup = now
+    cleaned = 0
+
+    try:
+        # MemorySaver 的内部存储结构：storage = {(thread_id, checkpoint_ns, checkpoint_id): checkpoint_data}
+        # 我们需要按 thread_id 分组并保留最新的
+        storage = getattr(_checkpointer, "storage", {})
+        if not storage:
+            return 0
+
+        # 按 thread_id 分组
+        by_thread: dict[str, list[tuple]] = {}
+        for key in list(storage.keys()):
+            if isinstance(key, tuple) and len(key) >= 1:
+                thread_id = key[0]
+                by_thread.setdefault(thread_id, []).append(key)
+
+        # 对每个 thread，只保留最新的 N 个 checkpoint
+        for thread_id, keys in by_thread.items():
+            if len(keys) <= _CHECKPOINT_MAX_PER_THREAD:
+                continue
+
+            # 按 checkpoint_id 排序（通常是时间戳格式）
+            sorted_keys = sorted(keys, key=lambda k: k[2] if len(k) > 2 else "", reverse=True)
+            keys_to_remove = sorted_keys[_CHECKPOINT_MAX_PER_THREAD:]
+
+            for key in keys_to_remove:
+                try:
+                    del storage[key]
+                    cleaned += 1
+                except KeyError:
+                    pass
+
+        if cleaned > 0:
+            logger.info(f"已清理 {cleaned} 个旧 checkpoint")
+
+    except Exception as e:
+        logger.debug(f"Checkpoint 清理时出错（非致命）: {e}")
+
+    return cleaned
 
 
 def build_graph(graph_config: dict):
@@ -182,6 +250,9 @@ def build_graph(graph_config: dict):
 
 def get_or_build_graph(graph_config: dict):
     """获取或构建编译后的图（带指纹缓存）。"""
+    # 定期清理旧 checkpoint，防止内存无限增长
+    cleanup_old_checkpoints()
+
     fp = _config_fingerprint(graph_config)
     if fp not in _graph_cache:
         compiled = build_graph(graph_config)

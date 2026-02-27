@@ -48,16 +48,50 @@ def _safe_open(path, *args, **kwargs):
 
 
 def _make_restricted_builtins():
-    """Create a restricted builtins dict for exec/eval."""
+    """Create a restricted builtins dict for exec/eval.
+
+    安全增强：移除更多可用于沙箱逃逸的内置函数，防止：
+    1. 对象继承链攻击：().__class__.__bases__[0].__subclasses__()
+    2. 属性链访问攻击：getattr(obj, '__class__')
+    3. 类型操作攻击：type(lambda:0).__globals__
+    """
     safe_builtins = {k: v for k, v in builtins.__dict__.items()}
-    # Remove dangerous builtins
-    for name in ("__import__", "exec", "eval", "compile", "breakpoint"):
+
+    # 移除危险的内置函数
+    dangerous_builtins = (
+        # 代码执行相关
+        "__import__", "exec", "eval", "compile", "breakpoint",
+        # 属性访问相关（用于沙箱逃逸）
+        "getattr", "setattr", "delattr", "hasattr",
+        # 类型操作相关（用于继承链攻击）
+        "type", "object", "super",
+        # 全局/局部变量访问
+        "globals", "locals", "vars", "dir",
+        # 其他危险函数
+        "memoryview", "classmethod", "staticmethod", "property",
+        # 内存操作
+        "id", "hash",
+    )
+    for name in dangerous_builtins:
         safe_builtins.pop(name, None)
-    # Replace __import__ with restricted version
+
+    # 替换 __import__ 为受限版本
     safe_builtins["__import__"] = _restricted_import
-    # Replace open with sandboxed version
+    # 替换 open 为沙箱版本
     safe_builtins["open"] = _safe_open
+
+    # 提供安全的替代函数
+    safe_builtins["safe_getattr"] = _safe_getattr
+
     return safe_builtins
+
+
+def _safe_getattr(obj, name, default=None):
+    """安全的 getattr 替代，阻止访问双下划线属性（防止沙箱逃逸）。"""
+    # 阻止访问任何双下划线属性（__class__、__bases__、__globals__ 等）
+    if name.startswith("__") or name.startswith("_"):
+        raise AttributeError(f"Access to '{name}' is blocked for security reasons.")
+    return getattr(obj, name, default)
 
 
 def _chdir_to_session_tmp():

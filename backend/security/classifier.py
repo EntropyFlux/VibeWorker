@@ -80,9 +80,31 @@ def classify_terminal_command(command: str) -> RiskLevel:
     """Classify a terminal command's risk level using shell parsing.
 
     Returns RiskLevel indicating how dangerous the command is.
+
+    安全增强：在 shlex 解析之前检测 shell 元字符，防止 shell=True 注入攻击。
+    shlex.split() 不会将 shell 元字符（如 ;、&、$()、反引号）解释为命令分隔符，
+    但 subprocess.run(shell=True) 会，因此需要在原始命令中直接检测这些元字符。
     """
     if not command or not command.strip():
         return RiskLevel.SAFE
+
+    # 安全增强：直接在原始命令字符串中检测 shell 注入元字符
+    # 这些字符会被 shell 解释，但 shlex.split() 不会将它们作为分隔符
+    shell_injection_patterns = [
+        (";", "命令分隔符"),
+        ("&&", "逻辑与链"),
+        ("||", "逻辑或链"),
+        ("$(", "命令替换"),
+        ("`", "反引号命令替换"),
+        (">", "输出重定向"),
+        ("<", "输入重定向"),
+        ("&", "后台执行或命令分隔"),
+    ]
+
+    # 检测未被引号包裹的 shell 元字符
+    if _contains_unquoted_shell_chars(command, shell_injection_patterns):
+        logger.warning(f"检测到 shell 注入元字符，命令被阻止: {command[:50]}...")
+        return RiskLevel.BLOCKED
 
     # Check blocked patterns first
     for pattern_fn in BLOCKED_PATTERNS:
@@ -121,6 +143,48 @@ def classify_terminal_command(command: str) -> RiskLevel:
         risk = _max_risk(risk, sub_risk)
 
     return risk
+
+
+def _contains_unquoted_shell_chars(command: str, patterns: list[tuple[str, str]]) -> bool:
+    """检测命令中是否包含未被引号包裹的 shell 元字符。
+
+    通过简单的状态机遍历命令，跟踪当前是否在引号内（单引号或双引号）。
+    只有在引号外发现的元字符才被视为危险。
+    """
+    in_single_quote = False
+    in_double_quote = False
+    i = 0
+    n = len(command)
+
+    while i < n:
+        char = command[i]
+
+        # 处理转义字符（在双引号内或引号外）
+        if char == '\\' and not in_single_quote and i + 1 < n:
+            i += 2  # 跳过转义字符及其后的字符
+            continue
+
+        # 切换引号状态
+        if char == "'" and not in_double_quote:
+            in_single_quote = not in_single_quote
+            i += 1
+            continue
+        if char == '"' and not in_single_quote:
+            in_double_quote = not in_double_quote
+            i += 1
+            continue
+
+        # 只在引号外检测 shell 元字符
+        if not in_single_quote and not in_double_quote:
+            for pattern, _ in patterns:
+                if command[i:i+len(pattern)] == pattern:
+                    # 特殊处理：单独的 & 用于后台运行（如 ls &），也需要阻止
+                    # 但 && 在上面已经被单独检测
+                    return True
+
+        i += 1
+
+    return False
 
 
 def _classify_single_command(tokens: list[str]) -> RiskLevel:
@@ -355,7 +419,10 @@ def _is_sensitive_file(filepath: str) -> bool:
 
 
 def classify_file_path(file_path: str) -> RiskLevel:
-    """Classify file read risk based on path sensitivity."""
+    """Classify file read risk based on path sensitivity.
+
+    敏感文件（.env、密钥、凭据等）返回 BLOCKED 级别以强制阻止读取。
+    """
     if _is_sensitive_file(file_path):
-        return RiskLevel.DANGEROUS
+        return RiskLevel.BLOCKED  # 敏感文件必须阻止，不仅仅是警告
     return RiskLevel.SAFE

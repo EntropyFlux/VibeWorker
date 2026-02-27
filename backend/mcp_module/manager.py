@@ -100,9 +100,27 @@ class MCPManager:
                 logger.warning(f"Error disconnecting MCP server '{name}': {e}")
 
     async def connect_server(self, name: str) -> None:
-        """Connect to a specific MCP server by name."""
+        """Connect to a specific MCP server by name.
+
+        安全修复：使用 per-server 锁替代全局锁，防止并发连接同一服务器导致资源泄漏，
+        同时允许不同服务器并行连接。
+        """
+        # 获取或创建该服务器专用的锁
         async with self._lock:
-            # If already connected, disconnect first
+            if not hasattr(self, "_server_locks"):
+                self._server_locks: dict[str, asyncio.Lock] = {}
+            if name not in self._server_locks:
+                self._server_locks[name] = asyncio.Lock()
+            server_lock = self._server_locks[name]
+
+        # 使用服务器专用锁保护整个连接过程
+        async with server_lock:
+            await self._connect_server_impl(name)
+
+    async def _connect_server_impl(self, name: str) -> None:
+        """实际的连接实现（必须在 server_lock 保护下调用）。"""
+        # 如果已连接，先断开
+        async with self._lock:
             if name in self._connections and self._connections[name]["status"] == STATUS_CONNECTED:
                 await self._disconnect_server_unlocked(name)
 
@@ -119,12 +137,12 @@ class MCPManager:
                 "error": None,
             }
 
+        exit_stack = AsyncExitStack()
         try:
             transport = srv_config.get("transport", "stdio")
             # stdio 类型进程可能因环境问题挂起，SSE 类型可能因网络延迟挂起，
             # 超时时间根据传输方式区分：stdio 默认 15s，SSE 默认 10s
             connect_timeout = 15.0 if transport == "stdio" else 10.0
-            exit_stack = AsyncExitStack()
 
             if transport == "stdio":
                 session = await self._connect_stdio(name, srv_config, exit_stack)
@@ -174,6 +192,13 @@ class MCPManager:
 
         except Exception as e:
             logger.error(f"MCP server '{name}' connection failed: {e}")
+            # 安全修复：连接失败时必须关闭 exit_stack，防止资源泄漏
+            # exit_stack 可能已经注册了 stdio 子进程或 SSE HTTP 连接
+            try:
+                await exit_stack.aclose()
+            except Exception as close_err:
+                logger.warning(f"Error closing exit_stack for '{name}': {close_err}")
+
             async with self._lock:
                 self._connections[name] = {
                     "session": None,

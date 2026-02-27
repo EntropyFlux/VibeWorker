@@ -31,13 +31,48 @@ from memory.models import (
 logger = logging.getLogger(__name__)
 
 
+def _tokenize_for_similarity(text: str) -> set[str]:
+    """对文本进行分词，支持中英文混合。
+
+    中文使用字符级分词（每个汉字作为一个 token），英文使用空格分词。
+    这确保中文文本也能正确计算 Jaccard 相似度。
+    """
+    tokens = set()
+    text_lower = text.lower()
+
+    # 分离中文和非中文部分
+    current_non_cjk = []
+    for char in text_lower:
+        # 检测 CJK 字符范围（基本区 + 扩展区）
+        if '\u4e00' <= char <= '\u9fff' or '\u3400' <= char <= '\u4dbf':
+            # 先处理之前积累的非中文部分
+            if current_non_cjk:
+                for word in ''.join(current_non_cjk).split():
+                    if word:
+                        tokens.add(word)
+                current_non_cjk = []
+            # 中文字符作为独立 token
+            tokens.add(char)
+        else:
+            current_non_cjk.append(char)
+
+    # 处理剩余的非中文部分
+    if current_non_cjk:
+        for word in ''.join(current_non_cjk).split():
+            if word:
+                tokens.add(word)
+
+    return tokens
+
+
 def _jaccard_similarity(text_a: str, text_b: str) -> float:
     """计算两段文本的 Jaccard 相似度（基于分词的集合交并比）
 
     用于轻量级重复检测，无需 LLM 调用。
+    支持中文：中文使用字符级分词，确保相似度计算有效。
     """
-    words_a = set(text_a.lower().split())
-    words_b = set(text_b.lower().split())
+    words_a = _tokenize_for_similarity(text_a)
+    words_b = _tokenize_for_similarity(text_b)
     if not words_a or not words_b:
         return 0.0
     intersection = len(words_a & words_b)
@@ -74,43 +109,82 @@ class MemoryManager:
     # ============================================
 
     def _load_memory_json(self) -> dict:
-        """加载 memory.json"""
+        """加载 memory.json
+
+        安全增强：主文件解析失败时自动尝试从备份恢复，避免数据丢失。
+        """
+        default_data = {
+            "version": 2,
+            "last_updated": datetime.now().isoformat(),
+            "rolling_summary": "",
+            "memories": [],
+        }
+
         if not self.memory_file.exists():
-            return {
-                "version": 2,
-                "last_updated": datetime.now().isoformat(),
-                "rolling_summary": "",
-                "memories": [],
-            }
+            return default_data
 
         try:
             return json.loads(self.memory_file.read_text(encoding="utf-8"))
         except json.JSONDecodeError as e:
             logger.error(f"memory.json 解析失败: {e}")
-            return {
-                "version": 2,
-                "last_updated": datetime.now().isoformat(),
-                "rolling_summary": "",
-                "memories": [],
-            }
+
+            # 尝试从备份恢复
+            if self.backup_file.exists():
+                logger.info("尝试从 memory.json.bak 恢复...")
+                try:
+                    backup_data = json.loads(self.backup_file.read_text(encoding="utf-8"))
+                    # 恢复成功，将备份内容写回主文件
+                    self.memory_file.write_text(
+                        json.dumps(backup_data, ensure_ascii=False, indent=2),
+                        encoding="utf-8"
+                    )
+                    logger.info("已从备份成功恢复 memory.json")
+                    return backup_data
+                except Exception as backup_err:
+                    logger.error(f"备份文件也无法解析: {backup_err}")
+
+            return default_data
 
     def _save_memory_json(self, data: dict) -> None:
-        """保存 memory.json（带自动备份）"""
+        """保存 memory.json（带自动备份）
+
+        安全增强：使用原子写入模式，先写临时文件再 rename，防止进程崩溃导致数据损坏。
+        """
+        import os
+        import tempfile
+
         # 更新时间戳
         data["last_updated"] = datetime.now().isoformat()
 
-        # 创建备份
+        # 创建备份（在写入新数据之前）
         if self.memory_file.exists():
             try:
                 shutil.copy2(self.memory_file, self.backup_file)
             except Exception as e:
                 logger.warning(f"创建备份失败: {e}")
 
-        # 写入文件
-        self.memory_file.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
+        # 原子写入：先写临时文件，再 rename
+        content = json.dumps(data, ensure_ascii=False, indent=2)
+        fd, tmp_path = tempfile.mkstemp(
+            suffix=".tmp",
+            prefix="memory_",
+            dir=str(self.memory_dir)
         )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+
+            # Windows 兼容：如果目标存在，先删除再重命名
+            if os.name == "nt" and self.memory_file.exists():
+                self.memory_file.unlink()
+            os.rename(tmp_path, self.memory_file)
+        except Exception:
+            # 清理临时文件
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
         # 记忆变更后使 prompt 缓存失效，避免下次对话使用过时的记忆数据
         try:

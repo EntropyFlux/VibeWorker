@@ -1,7 +1,10 @@
 """
 L1 Memory cache implementation using LRU eviction.
+
+线程安全增强：使用 threading.Lock 保护所有缓存操作。
 """
 
+import threading
 import time
 from collections import OrderedDict
 from typing import Any, Optional
@@ -19,7 +22,7 @@ class MemoryCache(BaseCache):
     Features:
     - TTL (Time-To-Live) for automatic expiration
     - LRU (Least Recently Used) eviction when max size reached
-    - Thread-safe operations
+    - Thread-safe operations (使用锁保护)
     - Statistics tracking
     """
 
@@ -35,6 +38,8 @@ class MemoryCache(BaseCache):
         self.default_ttl = default_ttl
         self._cache: OrderedDict[str, dict] = OrderedDict()
         self.stats = CacheStats()
+        # 线程安全：保护 OrderedDict 的复合操作
+        self._lock = threading.Lock()
 
     def get(self, key: str) -> Optional[Any]:
         """
@@ -46,24 +51,25 @@ class MemoryCache(BaseCache):
         Returns:
             Cached value if exists and not expired, None otherwise
         """
-        if key not in self._cache:
-            self.stats.record_miss()
-            return None
+        with self._lock:
+            if key not in self._cache:
+                self.stats.record_miss()
+                return None
 
-        entry = self._cache[key]
-        current_time = time.time()
+            entry = self._cache[key]
+            current_time = time.time()
 
-        # Check if expired
-        if current_time > entry["expire_at"]:
-            self.delete(key)
-            self.stats.record_miss()
-            return None
+            # Check if expired
+            if current_time > entry["expire_at"]:
+                self._delete_unlocked(key)
+                self.stats.record_miss()
+                return None
 
-        # Move to end (mark as recently used)
-        self._cache.move_to_end(key)
-        self.stats.record_hit()
+            # Move to end (mark as recently used)
+            self._cache.move_to_end(key)
+            self.stats.record_hit()
 
-        return entry["value"]
+            return entry["value"]
 
     def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
         """
@@ -84,20 +90,29 @@ class MemoryCache(BaseCache):
             "expire_at": current_time + ttl,
         }
 
-        # Update existing key or add new
+        with self._lock:
+            # Update existing key or add new
+            if key in self._cache:
+                self._cache[key] = entry
+                self._cache.move_to_end(key)
+            else:
+                # Evict oldest item if at capacity
+                if len(self._cache) >= self.max_size:
+                    oldest_key = next(iter(self._cache))
+                    self._delete_unlocked(oldest_key)
+                    logger.debug(f"Memory cache: Evicted oldest key: {oldest_key[:16]}...")
+
+                self._cache[key] = entry
+
+            self.stats.record_set()
+
+    def _delete_unlocked(self, key: str) -> bool:
+        """删除键（不加锁，供内部使用）。"""
         if key in self._cache:
-            self._cache[key] = entry
-            self._cache.move_to_end(key)
-        else:
-            # Evict oldest item if at capacity
-            if len(self._cache) >= self.max_size:
-                oldest_key = next(iter(self._cache))
-                self.delete(oldest_key)
-                logger.debug(f"Memory cache: Evicted oldest key: {oldest_key[:16]}...")
-
-            self._cache[key] = entry
-
-        self.stats.record_set()
+            del self._cache[key]
+            self.stats.record_delete()
+            return True
+        return False
 
     def delete(self, key: str) -> bool:
         """
@@ -109,11 +124,8 @@ class MemoryCache(BaseCache):
         Returns:
             True if key was deleted, False if key didn't exist
         """
-        if key in self._cache:
-            del self._cache[key]
-            self.stats.record_delete()
-            return True
-        return False
+        with self._lock:
+            return self._delete_unlocked(key)
 
     def clear(self) -> int:
         """
@@ -122,10 +134,11 @@ class MemoryCache(BaseCache):
         Returns:
             Number of items cleared
         """
-        count = len(self._cache)
-        self._cache.clear()
-        logger.info(f"Memory cache: Cleared {count} items")
-        return count
+        with self._lock:
+            count = len(self._cache)
+            self._cache.clear()
+            logger.info(f"Memory cache: Cleared {count} items")
+            return count
 
     def exists(self, key: str) -> bool:
         """
@@ -137,18 +150,19 @@ class MemoryCache(BaseCache):
         Returns:
             True if key exists and not expired, False otherwise
         """
-        if key not in self._cache:
-            return False
+        with self._lock:
+            if key not in self._cache:
+                return False
 
-        entry = self._cache[key]
-        current_time = time.time()
+            entry = self._cache[key]
+            current_time = time.time()
 
-        # Check if expired
-        if current_time > entry["expire_at"]:
-            self.delete(key)
-            return False
+            # Check if expired
+            if current_time > entry["expire_at"]:
+                self._delete_unlocked(key)
+                return False
 
-        return True
+            return True
 
     def cleanup_expired(self) -> int:
         """
@@ -157,20 +171,21 @@ class MemoryCache(BaseCache):
         Returns:
             Number of entries removed
         """
-        current_time = time.time()
-        expired_keys = [
-            key
-            for key, entry in self._cache.items()
-            if current_time > entry["expire_at"]
-        ]
+        with self._lock:
+            current_time = time.time()
+            expired_keys = [
+                key
+                for key, entry in self._cache.items()
+                if current_time > entry["expire_at"]
+            ]
 
-        for key in expired_keys:
-            self.delete(key)
+            for key in expired_keys:
+                self._delete_unlocked(key)
 
-        if expired_keys:
-            logger.debug(f"Memory cache: Cleaned up {len(expired_keys)} expired items")
+            if expired_keys:
+                logger.debug(f"Memory cache: Cleaned up {len(expired_keys)} expired items")
 
-        return len(expired_keys)
+            return len(expired_keys)
 
     def get_stats(self) -> dict:
         """Get cache statistics."""

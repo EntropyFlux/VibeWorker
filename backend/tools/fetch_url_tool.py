@@ -54,7 +54,34 @@ def fetch_url(url: str) -> str:
                 "Chrome/120.0.0.0 Safari/537.36"
             )
         }
-        response = requests.get(url, headers=headers, timeout=15)
+        # 安全修复：禁用自动重定向，手动处理以防止 SSRF 绕过
+        # 攻击者可能设置公网 URL 重定向到内网地址
+        response = requests.get(url, headers=headers, timeout=15, allow_redirects=False)
+
+        # 处理重定向：验证重定向目标的安全性
+        redirect_count = 0
+        max_redirects = 5
+        while response.is_redirect and redirect_count < max_redirects:
+            redirect_url = response.headers.get("Location")
+            if not redirect_url:
+                break
+
+            # 处理相对 URL
+            if redirect_url.startswith("/"):
+                from urllib.parse import urlparse, urlunparse
+                parsed = urlparse(url)
+                redirect_url = urlunparse((parsed.scheme, parsed.netloc, redirect_url, "", "", ""))
+
+            # 对重定向目标进行 SSRF 检查
+            if ssrf_on:
+                redirect_risk = classify_url(redirect_url)
+                if redirect_risk in (RiskLevel.BLOCKED, RiskLevel.DANGEROUS):
+                    return f"⛔ Blocked: Redirect to '{redirect_url}' is not allowed (SSRF protection)."
+
+            url = redirect_url
+            response = requests.get(url, headers=headers, timeout=15, allow_redirects=False)
+            redirect_count += 1
+
         response.raise_for_status()
 
         content_type = response.headers.get("content-type", "")

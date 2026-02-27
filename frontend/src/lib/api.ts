@@ -5,6 +5,37 @@
 
 const API_BASE = "http://localhost:8088";
 
+// 默认请求超时时间（毫秒）
+const DEFAULT_TIMEOUT = 30000;
+
+/**
+ * 带超时的 fetch 包装函数
+ * 如果后端无响应，不会无限等待
+ */
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit = {},
+  timeout: number = DEFAULT_TIMEOUT
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    return response;
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`请求超时 (${timeout}ms): ${url}`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 // ============================================
 // Types
 // ============================================
@@ -201,7 +232,7 @@ export async function* streamChat(
   signal?: AbortSignal,
   debug: boolean = false,
 ): AsyncGenerator<SSEEvent> {
-  const response = await fetch(`${API_BASE}/api/chat`, {
+  const response = await fetchWithTimeout(`${API_BASE}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -248,7 +279,7 @@ export async function* streamChat(
 // Session API
 // ============================================
 export async function fetchSessions(): Promise<Session[]> {
-  const res = await fetch(`${API_BASE}/api/sessions`);
+  const res = await fetchWithTimeout(`${API_BASE}/api/sessions`);
   const data = await res.json();
   return data.sessions || [];
 }
@@ -262,7 +293,7 @@ export interface SessionData {
 export async function fetchSessionMessages(
   sessionId: string
 ): Promise<SessionData> {
-  const res = await fetch(`${API_BASE}/api/sessions/${sessionId}`);
+  const res = await fetchWithTimeout(`${API_BASE}/api/sessions/${sessionId}`);
   const data = await res.json();
   return {
     messages: data.messages || [],
@@ -274,7 +305,7 @@ export async function fetchSessionMessages(
 export async function createSession(
   sessionId?: string
 ): Promise<string> {
-  const res = await fetch(`${API_BASE}/api/sessions`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/sessions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ session_id: sessionId }),
@@ -284,7 +315,7 @@ export async function createSession(
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {
-  await fetch(`${API_BASE}/api/sessions/${sessionId}`, {
+  await fetchWithTimeout(`${API_BASE}/api/sessions/${sessionId}`, {
     method: "DELETE",
   });
 }
@@ -317,7 +348,7 @@ export async function saveFile(
   path: string,
   content: string
 ): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/files`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/files`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path, content }),
@@ -341,7 +372,7 @@ export async function fetchFileTree(
 // Skills API
 // ============================================
 export async function fetchSkills(): Promise<Skill[]> {
-  const res = await fetch(`${API_BASE}/api/skills`);
+  const res = await fetchWithTimeout(`${API_BASE}/api/skills`);
   const data = await res.json();
   return data.skills || [];
 }
@@ -362,7 +393,7 @@ export async function deleteSkill(skillName: string): Promise<void> {
 // ============================================
 export async function checkHealth(): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}/api/health`);
+    const res = await fetchWithTimeout(`${API_BASE}/api/health`);
     return res.ok;
   } catch {
     return false;
@@ -378,7 +409,7 @@ export interface HealthStatus {
 
 export async function fetchHealthStatus(): Promise<HealthStatus | null> {
   try {
-    const res = await fetch(`${API_BASE}/api/health`);
+    const res = await fetchWithTimeout(`${API_BASE}/api/health`);
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -437,12 +468,12 @@ export interface SettingsData {
 }
 
 export async function fetchSettings(): Promise<SettingsData> {
-  const res = await fetch(`${API_BASE}/api/settings`);
+  const res = await fetchWithTimeout(`${API_BASE}/api/settings`);
   return await res.json();
 }
 
 export async function updateSettings(data: SettingsData): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/settings`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/settings`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -466,7 +497,7 @@ export async function testModelConnection(params: {
   model?: string;
   model_type?: "llm" | "embedding" | "translate";
 }): Promise<TestModelResult> {
-  const res = await fetch(`${API_BASE}/api/settings/test`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/settings/test`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
@@ -482,7 +513,7 @@ export async function testModelConnection(params: {
 // Docker Check API
 // ============================================
 export async function checkDockerAvailable(): Promise<{ available: boolean; message: string }> {
-  const res = await fetch(`${API_BASE}/api/docker/check`);
+  const res = await fetchWithTimeout(`${API_BASE}/api/docker/check`);
   if (!res.ok) {
     return { available: false, message: "Docker 检测请求失败" };
   }
@@ -498,7 +529,7 @@ export async function sendApproval(
   feedback?: string,
   action?: "approve" | "deny" | "instruct"
 ): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/approve`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/approve`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -518,7 +549,7 @@ export async function sendPlanApproval(
   planId: string,
   approved: boolean
 ): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/plan/approve`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/plan/approve`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ plan_id: planId, approved }),
@@ -533,7 +564,7 @@ export async function sendBrowserCallback(
   requestId: string,
   result: any
 ): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/browser/callback`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/browser/callback`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ request_id: requestId, result: result }),
@@ -552,7 +583,7 @@ export interface SecurityStatus {
 }
 
 export async function fetchSecurityStatus(): Promise<SecurityStatus> {
-  const res = await fetch(`${API_BASE}/api/security/status`);
+  const res = await fetchWithTimeout(`${API_BASE}/api/security/status`);
   if (!res.ok) throw new Error("Failed to fetch security status");
   return await res.json();
 }
@@ -637,7 +668,7 @@ export async function installSkill(
   name: string,
   version?: string
 ): Promise<{ status: string; skill_name: string; version: string; message: string }> {
-  const res = await fetch(`${API_BASE}/api/store/install`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/store/install`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ skill_name: name, version }),
@@ -664,7 +695,7 @@ export async function updateInstalledSkill(
 }
 
 export async function fetchStoreCategories(): Promise<string[]> {
-  const res = await fetch(`${API_BASE}/api/store/categories`);
+  const res = await fetchWithTimeout(`${API_BASE}/api/store/categories`);
   if (!res.ok) {
     throw new Error("Failed to fetch categories");
   }
@@ -718,7 +749,7 @@ export async function fetchMemoryEntries(
 ): Promise<{ entries: MemoryEntry[]; total: number }> {
   const params = new URLSearchParams({ page: page.toString(), page_size: pageSize.toString() });
   if (category) params.set("category", category);
-  const res = await fetch(`${API_BASE}/api/memory/entries?${params}`);
+  const res = await fetchWithTimeout(`${API_BASE}/api/memory/entries?${params}`);
   if (!res.ok) throw new Error("Failed to fetch memory entries");
   return await res.json();
 }
@@ -728,7 +759,7 @@ export async function addMemoryEntry(
   category: string = "general",
   salience: number = 0.5
 ): Promise<MemoryEntry> {
-  const res = await fetch(`${API_BASE}/api/memory/entries`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/memory/entries`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content, category, salience }),
@@ -742,7 +773,7 @@ export async function addMemoryEntry(
 }
 
 export async function deleteMemoryEntry(entryId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/memory/entries/${entryId}`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/memory/entries/${entryId}`, {
     method: "DELETE",
   });
   if (!res.ok) {
@@ -764,7 +795,7 @@ export async function updateMemoryEntry(
   entryId: string,
   data: { content?: string; category?: string; salience?: number }
 ): Promise<MemoryEntry> {
-  const res = await fetch(`${API_BASE}/api/memory/entries/${entryId}`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/memory/entries/${entryId}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -778,7 +809,7 @@ export async function updateMemoryEntry(
 }
 
 export async function fetchDailyLogEntries(date: string): Promise<DailyLogEntry[]> {
-  const res = await fetch(`${API_BASE}/api/memory/daily-logs/${date}/entries`);
+  const res = await fetchWithTimeout(`${API_BASE}/api/memory/daily-logs/${date}/entries`);
   if (!res.ok) throw new Error(`Failed to fetch daily log entries for ${date}`);
   const data = await res.json();
   return data.entries || [];
@@ -790,7 +821,7 @@ export async function updateDailyLogEntry(
   content: string,
   logType?: string
 ): Promise<DailyLogEntry> {
-  const res = await fetch(`${API_BASE}/api/memory/daily-logs/${date}/entries/${index}`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/memory/daily-logs/${date}/entries/${index}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content, log_type: logType }),
@@ -804,7 +835,7 @@ export async function updateDailyLogEntry(
 }
 
 export async function deleteDailyLogEntry(date: string, index: number): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/memory/daily-logs/${date}/entries/${index}`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/memory/daily-logs/${date}/entries/${index}`, {
     method: "DELETE",
   });
   if (!res.ok) {
@@ -814,21 +845,21 @@ export async function deleteDailyLogEntry(date: string, index: number): Promise<
 }
 
 export async function fetchDailyLogs(): Promise<DailyLog[]> {
-  const res = await fetch(`${API_BASE}/api/memory/daily-logs`);
+  const res = await fetchWithTimeout(`${API_BASE}/api/memory/daily-logs`);
   if (!res.ok) throw new Error("Failed to fetch daily logs");
   const data = await res.json();
   return data.logs || [];
 }
 
 export async function fetchDailyLogContent(date: string): Promise<string> {
-  const res = await fetch(`${API_BASE}/api/memory/daily-logs/${date}`);
+  const res = await fetchWithTimeout(`${API_BASE}/api/memory/daily-logs/${date}`);
   if (!res.ok) throw new Error(`No log found for ${date}`);
   const data = await res.json();
   return data.content;
 }
 
 export async function deleteDailyLog(date: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/memory/daily-logs/${date}`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/memory/daily-logs/${date}`, {
     method: "DELETE",
   });
   if (!res.ok) throw new Error(`Failed to delete daily log for ${date}`);
@@ -841,7 +872,7 @@ export async function searchMemory(
   category?: string,
   sourceType?: string
 ): Promise<{ results: MemorySearchResult[]; total: number }> {
-  const res = await fetch(`${API_BASE}/api/memory/search`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/memory/search`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query, top_k: topK, use_decay: useDecay, category, source_type: sourceType }),
@@ -852,13 +883,13 @@ export async function searchMemory(
 }
 
 export async function fetchMemoryStats(): Promise<MemoryStats> {
-  const res = await fetch(`${API_BASE}/api/memory/stats`);
+  const res = await fetchWithTimeout(`${API_BASE}/api/memory/stats`);
   if (!res.ok) throw new Error("Failed to fetch memory stats");
   return await res.json();
 }
 
 export async function reindexMemory(): Promise<string> {
-  const res = await fetch(`${API_BASE}/api/memory/reindex`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/memory/reindex`, {
     method: "POST",
   });
   if (!res.ok) throw new Error("Failed to reindex memory");
@@ -986,7 +1017,7 @@ export async function compressMemory(
 }
 
 export async function fetchRollingSummary(): Promise<string> {
-  const res = await fetch(`${API_BASE}/api/memory/rolling-summary`);
+  const res = await fetchWithTimeout(`${API_BASE}/api/memory/rolling-summary`);
   if (!res.ok) throw new Error("Failed to fetch rolling summary");
   const data = await res.json();
   return data.summary || "";
@@ -1022,7 +1053,7 @@ export interface CacheEntriesResponse {
 }
 
 export async function fetchCacheStats(): Promise<CacheStats> {
-  const res = await fetch(`${API_BASE}/api/cache/stats`);
+  const res = await fetchWithTimeout(`${API_BASE}/api/cache/stats`);
   if (!res.ok) throw new Error("Failed to fetch cache stats");
   const data = await res.json();
   return data.cache_stats;
@@ -1038,7 +1069,7 @@ export async function fetchCacheEntries(
     page: page.toString(),
     page_size: pageSize.toString(),
   });
-  const res = await fetch(`${API_BASE}/api/cache/entries?${params}`);
+  const res = await fetchWithTimeout(`${API_BASE}/api/cache/entries?${params}`);
   if (!res.ok) throw new Error("Failed to fetch cache entries");
   return await res.json();
 }
@@ -1068,7 +1099,7 @@ export async function clearCache(
 }
 
 export async function cleanupCache(): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/cache/cleanup`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/cache/cleanup`, {
     method: "POST",
   });
   if (!res.ok) throw new Error("Failed to cleanup cache");
@@ -1102,14 +1133,14 @@ export interface McpTool {
 }
 
 export async function fetchMcpServers(): Promise<Record<string, McpServerInfo>> {
-  const res = await fetch(`${API_BASE}/api/mcp/servers`);
+  const res = await fetchWithTimeout(`${API_BASE}/api/mcp/servers`);
   if (!res.ok) throw new Error("Failed to fetch MCP servers");
   const data = await res.json();
   return data.servers || {};
 }
 
 export async function addMcpServer(name: string, config: McpServerConfig): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/mcp/servers/${encodeURIComponent(name)}`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/mcp/servers/${encodeURIComponent(name)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(config),
@@ -1121,7 +1152,7 @@ export async function addMcpServer(name: string, config: McpServerConfig): Promi
 }
 
 export async function updateMcpServer(name: string, config: McpServerConfig): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/mcp/servers/${encodeURIComponent(name)}`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/mcp/servers/${encodeURIComponent(name)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(config),
@@ -1133,7 +1164,7 @@ export async function updateMcpServer(name: string, config: McpServerConfig): Pr
 }
 
 export async function deleteMcpServer(name: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/mcp/servers/${encodeURIComponent(name)}`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/mcp/servers/${encodeURIComponent(name)}`, {
     method: "DELETE",
   });
   if (!res.ok) {
@@ -1143,7 +1174,7 @@ export async function deleteMcpServer(name: string): Promise<void> {
 }
 
 export async function connectMcpServer(name: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/mcp/servers/${encodeURIComponent(name)}/connect`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/mcp/servers/${encodeURIComponent(name)}/connect`, {
     method: "POST",
   });
   if (!res.ok) {
@@ -1153,7 +1184,7 @@ export async function connectMcpServer(name: string): Promise<void> {
 }
 
 export async function disconnectMcpServer(name: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/mcp/servers/${encodeURIComponent(name)}/disconnect`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/mcp/servers/${encodeURIComponent(name)}/disconnect`, {
     method: "POST",
   });
   if (!res.ok) {
@@ -1163,14 +1194,14 @@ export async function disconnectMcpServer(name: string): Promise<void> {
 }
 
 export async function fetchMcpTools(): Promise<McpTool[]> {
-  const res = await fetch(`${API_BASE}/api/mcp/tools`);
+  const res = await fetchWithTimeout(`${API_BASE}/api/mcp/tools`);
   if (!res.ok) throw new Error("Failed to fetch MCP tools");
   const data = await res.json();
   return data.tools || [];
 }
 
 export async function fetchMcpServerTools(name: string): Promise<McpTool[]> {
-  const res = await fetch(`${API_BASE}/api/mcp/servers/${encodeURIComponent(name)}/tools`);
+  const res = await fetchWithTimeout(`${API_BASE}/api/mcp/servers/${encodeURIComponent(name)}/tools`);
   if (!res.ok) throw new Error("Failed to fetch server tools");
   const data = await res.json();
   return data.tools || [];
@@ -1193,7 +1224,7 @@ export interface ModelPoolData {
 }
 
 export async function fetchModelPool(): Promise<ModelPoolData> {
-  const res = await fetch(`${API_BASE}/api/model-pool`);
+  const res = await fetchWithTimeout(`${API_BASE}/api/model-pool`);
   if (!res.ok) throw new Error("Failed to fetch model pool");
   return await res.json();
 }
@@ -1204,7 +1235,7 @@ export async function addPoolModel(data: {
   api_base: string;
   model: string;
 }): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/model-pool`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/model-pool`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -1219,7 +1250,7 @@ export async function updatePoolModel(
   modelId: string,
   data: { name?: string; api_key?: string; api_base?: string; model?: string }
 ): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/model-pool/${encodeURIComponent(modelId)}`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/model-pool/${encodeURIComponent(modelId)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -1231,7 +1262,7 @@ export async function updatePoolModel(
 }
 
 export async function deletePoolModel(modelId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/model-pool/${encodeURIComponent(modelId)}`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/model-pool/${encodeURIComponent(modelId)}`, {
     method: "DELETE",
   });
   if (!res.ok) {
@@ -1243,7 +1274,7 @@ export async function deletePoolModel(modelId: string): Promise<void> {
 export async function updateAssignments(
   assignments: { llm?: string; embedding?: string; translate?: string }
 ): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/model-pool/assignments`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/model-pool/assignments`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(assignments),
@@ -1257,7 +1288,7 @@ export async function updateAssignments(
 export async function testPoolModel(
   modelId: string
 ): Promise<TestModelResult> {
-  const res = await fetch(`${API_BASE}/api/model-pool/${encodeURIComponent(modelId)}/test`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/model-pool/${encodeURIComponent(modelId)}/test`, {
     method: "POST",
   });
   if (!res.ok) {
@@ -1282,7 +1313,7 @@ export async function translateContent(
   content: string,
   targetLanguage: string = "zh-CN"
 ): Promise<TranslateResponse> {
-  const res = await fetch(`${API_BASE}/api/translate`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/translate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content, target_language: targetLanguage }),
@@ -1317,7 +1348,7 @@ export interface GraphConfigData {
 }
 
 export async function fetchGraphConfig(): Promise<GraphConfigData> {
-  const res = await fetch(`${API_BASE}/api/graph-config`);
+  const res = await fetchWithTimeout(`${API_BASE}/api/graph-config`);
   if (!res.ok) throw new Error("Failed to fetch graph config");
   return await res.json();
 }
@@ -1325,7 +1356,7 @@ export async function fetchGraphConfig(): Promise<GraphConfigData> {
 export async function updateGraphConfig(
   data: Partial<GraphConfigData>
 ): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/graph-config`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/graph-config`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),

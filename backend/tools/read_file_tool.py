@@ -61,7 +61,8 @@ def read_file(file_path: str) -> str:
             sensitive_on = True
         if sensitive_on:
             risk = classify_file_path(str(path))
-            if risk == RiskLevel.BLOCKED:
+            # 检查 BLOCKED 和 DANGEROUS 级别（防御深度：即使分类器改变返回值也能拦截）
+            if risk in (RiskLevel.BLOCKED, RiskLevel.DANGEROUS):
                 return f"⛔ Blocked: Cannot read sensitive file: {path.name}"
 
         if not path.exists():

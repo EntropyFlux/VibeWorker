@@ -13,11 +13,15 @@ from engine.context import RunContext
 logger = logging.getLogger(__name__)
 
 
-class DebugLevel(str, Enum):
-    OFF = "off"
-    BASIC = "basic"         # 仅工具计时
-    STANDARD = "standard"   # + LLM 调用开始/结束 + Token 统计
-    FULL = "full"           # + 完整输入/输出内容
+class DebugLevel(Enum):
+    """调试级别枚举。
+
+    使用整数值确保比较逻辑正确（字符串比较会导致 "full" < "standard" 的错误）。
+    """
+    OFF = 0
+    BASIC = 1           # 仅工具计时
+    STANDARD = 2        # + LLM 调用开始/结束 + Token 统计
+    FULL = 3            # + 完整输入/输出内容
 
 
 class InMemoryCollector:

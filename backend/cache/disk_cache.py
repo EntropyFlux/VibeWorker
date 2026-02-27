@@ -51,6 +51,13 @@ class DiskCache(BaseCache):
         # Create cache directory
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
+        # 性能优化：使用内存中的估算大小，避免每次 set() 都遍历文件系统
+        # _estimated_size_bytes 是一个近似值，会在 set/delete/clear 时更新
+        # 定期（如每 100 次操作或清理时）与实际大小同步
+        self._estimated_size_bytes: int = 0
+        self._ops_since_sync: int = 0
+        self._OPS_SYNC_THRESHOLD = 100  # 每 100 次操作同步一次实际大小
+
     def _get_file_path(self, key: str) -> Path:
         """
         Get file path for a cache key.
@@ -67,6 +74,23 @@ class DiskCache(BaseCache):
         subdir = self.cache_dir / key[:2]
         subdir.mkdir(exist_ok=True)
         return subdir / f"{key}.json"
+
+    def _sync_size(self) -> None:
+        """同步内存中的估算大小与实际文件系统大小。
+
+        性能优化：不是每次 set() 都遍历文件系统，而是定期同步。
+        """
+        try:
+            total_size = 0
+            for file_path in self.cache_dir.rglob("*.json"):
+                try:
+                    total_size += file_path.stat().st_size
+                except Exception:
+                    pass
+            self._estimated_size_bytes = total_size
+            self._ops_since_sync = 0
+        except Exception as e:
+            logger.debug(f"Disk cache: Failed to sync size: {e}")
 
     def get(self, key: str) -> Optional[Any]:
         """
@@ -131,14 +155,34 @@ class DiskCache(BaseCache):
         file_path = self._get_file_path(key)
 
         try:
+            # 获取旧文件大小（如果存在），用于更新估算值
+            old_size = 0
+            if file_path.exists():
+                try:
+                    old_size = file_path.stat().st_size
+                except Exception:
+                    pass
+
+            content = json.dumps(entry, ensure_ascii=False, indent=2)
             with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(entry, f, ensure_ascii=False, indent=2)
+                f.write(content)
+
+            # 更新估算大小
+            new_size = len(content.encode("utf-8"))
+            self._estimated_size_bytes += (new_size - old_size)
+            self._ops_since_sync += 1
 
             self.stats.record_set()
 
-            # Check if we need to cleanup
-            if self.get_size_mb() > self.max_size_mb:
+            # 性能优化：使用估算大小检查，避免每次都遍历文件系统
+            if self._estimated_size_bytes > self.max_size_mb * 1024 * 1024:
                 self.cleanup_lru()
+                # 清理后同步实际大小
+                self._sync_size()
+
+            # 定期同步实际大小
+            if self._ops_since_sync >= self._OPS_SYNC_THRESHOLD:
+                self._sync_size()
 
         except Exception as e:
             logger.error(f"Disk cache: Failed to write {file_path}: {e}")
