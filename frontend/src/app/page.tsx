@@ -20,7 +20,7 @@ import InspectorPanel, { type InspectorMode } from "@/components/editor/Inspecto
 import SettingsDialog, { initTheme } from "@/components/settings/SettingsDialog";
 import OnboardingModal from "@/components/settings/OnboardingModal";
 import ExtensionInstallDialog from "@/components/settings/ExtensionInstallDialog";
-import { checkHealth, generateSessionTitle, fetchSettings, fetchModelPool, type MemoryEntry, type DailyLogEntry } from "@/lib/api";
+import { checkHealth, generateSessionTitle, fetchSettings, fetchModelPool, fetchBranding, getLogoUrl, type MemoryEntry, type DailyLogEntry, type BrandingData } from "@/lib/api";
 import { sessionStore } from "@/lib/sessionStore";
 
 type ViewMode = "chat" | "memory" | "skills" | "mcp" | "cache";
@@ -54,6 +54,9 @@ export default function HomePage() {
   // Onboarding 状态
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [isModelConfigured, setIsModelConfigured] = useState<boolean>(true);
+
+  // 品牌设置状态
+  const [branding, setBranding] = useState<BrandingData>({ name: "VibeWorker", logo_url: null });
 
   // 记忆编辑状态
   const [inspectorMode, setInspectorMode] = useState<InspectorMode>("file");
@@ -89,15 +92,19 @@ export default function HomePage() {
       if (v >= RIGHT_MIN && v <= RIGHT_MAX) setRightWidth(v);
     }
 
-    // 检查是否需要显示 onboarding
+    // 检查是否需要显示 onboarding，同时加载品牌设置
     const checkOnboarding = async () => {
       try {
-        const [settings, poolData] = await Promise.all([
+        const [settings, poolData, brandingData] = await Promise.all([
           fetchSettings(),
-          fetchModelPool()
+          fetchModelPool(),
+          fetchBranding().catch(() => ({ name: "VibeWorker", logo_url: null })),
         ]);
 
-        // 从本地存储检查是否用户已选择过“稍后配置”
+        // 设置品牌数据
+        setBranding(brandingData);
+
+        // 从本地存储检查是否用户已选择过"稍后配置"
         const skipped = localStorage.getItem("vibeworker_skip_onboarding");
 
         // 如果系统未配置主模型（既不存在于 .env 传统设置中，在 pool assignment 里也没有）
@@ -116,6 +123,20 @@ export default function HomePage() {
     };
 
     checkOnboarding();
+  }, []);
+
+  // 监听品牌更新事件
+  useEffect(() => {
+    const handler = async () => {
+      try {
+        const brandingData = await fetchBranding();
+        setBranding(brandingData);
+      } catch (e) {
+        console.error("Failed to refresh branding:", e);
+      }
+    };
+    window.addEventListener("vibeworker-branding-updated", handler);
+    return () => window.removeEventListener("vibeworker-branding-updated", handler);
   }, []);
 
   // Listen for debug toggle from settings dialog
@@ -346,9 +367,13 @@ export default function HomePage() {
       <header className="h-12 flex items-center justify-between px-4 border-b border-border/40 glass-subtle shrink-0 z-50">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <img src="/logo.png" alt="VibeWorker Logo" className="w-6 h-6 dark:invert" />
+            <img
+              src={branding.logo_url ? getLogoUrl(branding.logo_url) : "/logo.png"}
+              alt={`${branding.name} Logo`}
+              className="w-6 h-6 dark:invert"
+            />
             <h1 className="text-sm font-semibold tracking-tight">
-              VibeWorker
+              {branding.name}
             </h1>
           </div>
           <span className="text-[10px] text-muted-foreground/50 font-mono bg-muted/50 px-1.5 py-0.5 rounded-md">
@@ -481,6 +506,7 @@ export default function HomePage() {
             onFileOpen={handleFileOpen}
             isModelConfigured={isModelConfigured}
             onRequestOnboarding={() => setShowOnboarding(true)}
+            branding={branding}
           />
         </main>
 

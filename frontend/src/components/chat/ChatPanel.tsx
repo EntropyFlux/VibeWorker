@@ -7,7 +7,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
-import { type ToolCall, type MessageSegment } from "@/lib/api";
+import { type ToolCall, type MessageSegment, type BrandingData, getLogoUrl } from "@/lib/api";
 import { useSessionState, useSessionActions } from "@/lib/sessionStore";
 import type { ThinkingStep } from "@/lib/sessionStore";
 import ApprovalDialog from "./ApprovalDialog";
@@ -55,6 +55,7 @@ interface ChatPanelProps {
     onFileOpen?: (path: string) => void;
     isModelConfigured?: boolean;
     onRequestOnboarding?: () => void;
+    branding?: BrandingData;
 }
 
 /** Map tool names to friendly Chinese labels with emoji */
@@ -269,6 +270,7 @@ export default function ChatPanel({
     onFileOpen,
     isModelConfigured = true,
     onRequestOnboarding,
+    branding = { name: "VibeWorker", logo_url: null },
 }: ChatPanelProps) {
     // Store-driven state
     const { messages, isStreaming, streamingContent, streamingSegments, thinkingSteps, approvalRequest, planApprovalRequest, currentPlan, planFadeOut, planStepTimestamps, planStepActivity, streamingPhase } = useSessionState(sessionId);
@@ -399,8 +401,12 @@ export default function ChatPanel({
                 )}
                 {messages.length === 0 && !isStreaming && (
                     <div className="flex flex-col items-center justify-center h-full text-center animate-fade-in-up">
-                        <img src="/logo.png" alt="VibeWorker Logo" className="w-16 h-16 mb-4 dark:invert opacity-90" />
-                        <h2 className="text-xl font-semibold mb-2">VibeWorker</h2>
+                        <img
+                            src={branding.logo_url ? getLogoUrl(branding.logo_url) : "/logo.png"}
+                            alt={`${branding.name} Logo`}
+                            className="w-16 h-16 mb-4 dark:invert opacity-90"
+                        />
+                        <h2 className="text-xl font-semibold mb-2">{branding.name}</h2>
                         <p className="text-muted-foreground text-sm max-w-md">
                             你的本地 AI 副手，拥有真实记忆和可扩展技能。
                             <br />

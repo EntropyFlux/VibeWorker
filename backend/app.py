@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import Optional
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 import uvicorn
 
@@ -2486,6 +2486,160 @@ async def cleanup_cache():
     except Exception as e:
         logger.error(f"Failed to cleanup cache: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# 品牌设置端点
+# ============================================
+
+def _branding_path() -> Path:
+    """返回品牌配置文件路径。"""
+    return Path(settings.data_dir).expanduser().resolve() / "branding.json"
+
+
+def _logo_path() -> Path:
+    """返回自定义 LOGO 文件路径。"""
+    return Path(settings.data_dir).expanduser().resolve() / "logo.png"
+
+
+def _load_branding() -> dict:
+    """加载品牌配置，不存在时返回默认值。"""
+    path = _branding_path()
+    default = {
+        "name": "VibeWorker",
+        "logo_url": None,  # None 表示使用默认 LOGO
+    }
+    if not path.exists():
+        return default
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return {**default, **data}
+    except Exception as e:
+        logger.warning(f"加载品牌配置失败: {e}")
+        return default
+
+
+def _save_branding(data: dict) -> None:
+    """保存品牌配置。"""
+    path = _branding_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+class BrandingUpdateRequest(BaseModel):
+    name: Optional[str] = None
+
+
+@app.get("/api/branding")
+async def get_branding():
+    """获取品牌设置（名称和 LOGO URL）。"""
+    branding = _load_branding()
+    # 如果存在自定义 LOGO，返回 API 路径
+    if _logo_path().exists():
+        branding["logo_url"] = "/api/branding/logo"
+    return branding
+
+
+@app.put("/api/branding")
+async def update_branding(request: BrandingUpdateRequest):
+    """更新品牌名称。"""
+    branding = _load_branding()
+    if request.name is not None:
+        branding["name"] = request.name.strip() or "VibeWorker"
+    _save_branding(branding)
+    return {"status": "ok", "branding": branding}
+
+
+@app.post("/api/branding/logo")
+async def upload_logo(file: UploadFile = File(...)):
+    """上传自定义 LOGO 图片。支持 PNG、JPG、SVG 格式。"""
+    # 验证文件类型
+    allowed_types = ["image/png", "image/jpeg", "image/jpg", "image/svg+xml", "image/webp"]
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不支持的文件类型: {file.content_type}。支持: PNG, JPG, SVG, WebP"
+        )
+
+    # 限制文件大小（2MB）
+    content = await file.read()
+    if len(content) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="文件大小不能超过 2MB")
+
+    # 保存文件（统一保存为 logo.png，但实际可能是其他格式）
+    logo_path = _logo_path()
+    logo_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # 根据实际类型确定扩展名
+    ext_map = {
+        "image/png": ".png",
+        "image/jpeg": ".jpg",
+        "image/jpg": ".jpg",
+        "image/svg+xml": ".svg",
+        "image/webp": ".webp",
+    }
+    ext = ext_map.get(file.content_type, ".png")
+    # 清理旧 LOGO（可能是不同格式）
+    for old_ext in [".png", ".jpg", ".svg", ".webp"]:
+        old_path = logo_path.with_suffix(old_ext)
+        if old_path.exists():
+            old_path.unlink()
+
+    # 保存新 LOGO
+    actual_path = logo_path.with_suffix(ext)
+    with open(actual_path, "wb") as f:
+        f.write(content)
+
+    # 更新品牌配置记录实际扩展名
+    branding = _load_branding()
+    branding["logo_ext"] = ext
+    _save_branding(branding)
+
+    logger.info(f"Logo uploaded: {actual_path}")
+    return {"status": "ok", "logo_url": "/api/branding/logo"}
+
+
+@app.get("/api/branding/logo")
+async def get_logo():
+    """获取自定义 LOGO 图片。"""
+    branding = _load_branding()
+    ext = branding.get("logo_ext", ".png")
+    logo_path = _logo_path().with_suffix(ext)
+
+    if not logo_path.exists():
+        raise HTTPException(status_code=404, detail="未设置自定义 LOGO")
+
+    media_type_map = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".svg": "image/svg+xml",
+        ".webp": "image/webp",
+    }
+    media_type = media_type_map.get(ext, "image/png")
+
+    return FileResponse(logo_path, media_type=media_type)
+
+
+@app.delete("/api/branding/logo")
+async def delete_logo():
+    """删除自定义 LOGO，恢复默认。"""
+    branding = _load_branding()
+    ext = branding.get("logo_ext", ".png")
+    logo_path = _logo_path().with_suffix(ext)
+
+    if logo_path.exists():
+        logo_path.unlink()
+        logger.info(f"Logo deleted: {logo_path}")
+
+    # 清除扩展名记录
+    if "logo_ext" in branding:
+        del branding["logo_ext"]
+    branding["logo_url"] = None
+    _save_branding(branding)
+
+    return {"status": "ok", "message": "LOGO 已重置为默认"}
 
 
 # ============================================

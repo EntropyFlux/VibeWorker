@@ -484,6 +484,69 @@ export async function updateSettings(data: SettingsData): Promise<void> {
   }
 }
 
+// ============================================
+// Branding API
+// ============================================
+
+export interface BrandingData {
+  name: string;
+  logo_url: string | null;
+}
+
+export async function fetchBranding(): Promise<BrandingData> {
+  const res = await fetchWithTimeout(`${API_BASE}/api/branding`);
+  return await res.json();
+}
+
+export async function updateBranding(name: string): Promise<BrandingData> {
+  const res = await fetchWithTimeout(`${API_BASE}/api/branding`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to update branding");
+  }
+  const data = await res.json();
+  return data.branding;
+}
+
+export async function uploadLogo(file: File): Promise<string> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await fetchWithTimeout(`${API_BASE}/api/branding/logo`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to upload logo");
+  }
+  const data = await res.json();
+  return data.logo_url;
+}
+
+export async function deleteLogo(): Promise<void> {
+  const res = await fetchWithTimeout(`${API_BASE}/api/branding/logo`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to delete logo");
+  }
+}
+
+/** 获取完整的 LOGO URL（处理相对路径） */
+export function getLogoUrl(logoUrl: string | null): string {
+  if (!logoUrl) return "/logo.png";
+  if (logoUrl.startsWith("/api/")) {
+    return `${API_BASE}${logoUrl}`;
+  }
+  return logoUrl;
+}
+
 export interface TestModelResult {
   status: "ok" | "error";
   reply?: string;
