@@ -55,8 +55,16 @@ export default function HomePage() {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [isModelConfigured, setIsModelConfigured] = useState<boolean>(true);
 
-  // 品牌设置状态
-  const [branding, setBranding] = useState<BrandingData>({ name: "VibeWorker", logo_url: null });
+  // 品牌设置状态（从 localStorage 缓存初始化，避免闪烁）
+  const [branding, setBranding] = useState<BrandingData>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const cached = localStorage.getItem("vibeworker_branding");
+        if (cached) return JSON.parse(cached);
+      } catch { /* ignore */ }
+    }
+    return { name: "VibeWorker", logo_url: null };
+  });
 
   // 记忆编辑状态
   const [inspectorMode, setInspectorMode] = useState<InspectorMode>("file");
@@ -101,8 +109,9 @@ export default function HomePage() {
           fetchBranding().catch(() => ({ name: "VibeWorker", logo_url: null })),
         ]);
 
-        // 设置品牌数据
+        // 设置品牌数据并缓存到 localStorage
         setBranding(brandingData);
+        localStorage.setItem("vibeworker_branding", JSON.stringify(brandingData));
 
         // 从本地存储检查是否用户已选择过"稍后配置"
         const skipped = localStorage.getItem("vibeworker_skip_onboarding");
@@ -131,6 +140,7 @@ export default function HomePage() {
       try {
         const brandingData = await fetchBranding();
         setBranding(brandingData);
+        localStorage.setItem("vibeworker_branding", JSON.stringify(brandingData));
       } catch (e) {
         console.error("Failed to refresh branding:", e);
       }

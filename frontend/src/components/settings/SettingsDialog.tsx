@@ -589,7 +589,6 @@ export default function SettingsDialog() {
     const [brandingName, setBrandingName] = useState("VibeWorker");
     const [logoPreview, setLogoPreview] = useState<string | null>(null);
     const [uploadingLogo, setUploadingLogo] = useState(false);
-    const [savingBranding, setSavingBranding] = useState(false);
     const logoInputRef = useRef<HTMLInputElement>(null);
     const [form, setForm] = useState<SettingsData>({
         openai_api_key: "",
@@ -661,7 +660,19 @@ export default function SettingsDialog() {
             applyTheme(form.theme || "light");
             // Exclude theme from backend payload (theme is frontend-only, stored in localStorage)
             const { theme: _, ...backendSettings } = form;
-            await updateSettings(backendSettings as SettingsData);
+            // 并行保存设置和品牌
+            await Promise.all([
+                updateSettings(backendSettings as SettingsData),
+                // 仅当名称有变化时更新品牌
+                brandingName !== branding.name ? updateBranding(brandingName) : Promise.resolve(branding),
+            ]);
+            // 更新本地品牌缓存并触发全局刷新
+            if (brandingName !== branding.name) {
+                const newBranding = { ...branding, name: brandingName };
+                setBranding(newBranding);
+                localStorage.setItem("vibeworker_branding", JSON.stringify(newBranding));
+                window.dispatchEvent(new CustomEvent("vibeworker-branding-updated"));
+            }
             setOpen(false);
         } catch {
             // ignore
@@ -708,11 +719,7 @@ export default function SettingsDialog() {
                     </div>
                 ) : (
                     <Tabs defaultValue="general" className="w-full">
-                        <TabsList className="grid w-full grid-cols-6 mb-4">
-                            <TabsTrigger value="branding" className="text-xs">
-                                <span className="w-1.5 h-1.5 rounded-full bg-pink-500 mr-1.5" />
-                                品牌
-                            </TabsTrigger>
+                        <TabsList className="grid w-full grid-cols-5 mb-4">
                             <TabsTrigger value="general" className="text-xs">
                                 <span className="w-1.5 h-1.5 rounded-full bg-slate-500 mr-1.5" />
                                 通用
@@ -734,137 +741,6 @@ export default function SettingsDialog() {
                                 安全
                             </TabsTrigger>
                         </TabsList>
-
-                        {/* Branding Tab */}
-                        <TabsContent value="branding" className="space-y-4 mt-0 max-h-[60vh] overflow-y-auto pr-1">
-                            <div className="space-y-1.5">
-                                <label className="text-xs font-medium text-muted-foreground">项目名称</label>
-                                <input
-                                    type="text"
-                                    value={brandingName}
-                                    onChange={(e) => setBrandingName(e.target.value)}
-                                    placeholder="VibeWorker"
-                                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                                />
-                                <p className="text-[10px] text-muted-foreground">
-                                    显示在顶部导航栏和欢迎页面的名称
-                                </p>
-                            </div>
-
-                            <div className="space-y-1.5">
-                                <label className="text-xs font-medium text-muted-foreground">项目 LOGO</label>
-                                <div className="flex items-start gap-4">
-                                    {/* LOGO 预览 */}
-                                    <div className="w-20 h-20 rounded-lg border border-border bg-muted/30 flex items-center justify-center overflow-hidden shrink-0">
-                                        {logoPreview ? (
-                                            <img
-                                                src={logoPreview}
-                                                alt="Logo preview"
-                                                className="w-full h-full object-contain"
-                                            />
-                                        ) : (
-                                            <ImageIcon className="w-8 h-8 text-muted-foreground/40" />
-                                        )}
-                                    </div>
-
-                                    {/* 上传控制 */}
-                                    <div className="flex-1 space-y-2">
-                                        <input
-                                            ref={logoInputRef}
-                                            type="file"
-                                            accept="image/png,image/jpeg,image/svg+xml,image/webp"
-                                            className="hidden"
-                                            onChange={async (e) => {
-                                                const file = e.target.files?.[0];
-                                                if (!file) return;
-                                                setUploadingLogo(true);
-                                                try {
-                                                    const url = await uploadLogo(file);
-                                                    const fullUrl = getLogoUrl(url);
-                                                    setLogoPreview(fullUrl + "?t=" + Date.now());
-                                                    setBranding((prev) => ({ ...prev, logo_url: url }));
-                                                    // 触发全局刷新事件
-                                                    window.dispatchEvent(new CustomEvent("vibeworker-branding-updated"));
-                                                } catch (err) {
-                                                    alert(err instanceof Error ? err.message : "上传失败");
-                                                } finally {
-                                                    setUploadingLogo(false);
-                                                    if (logoInputRef.current) logoInputRef.current.value = "";
-                                                }
-                                            }}
-                                        />
-                                        <Button
-                                            type="button"
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={() => logoInputRef.current?.click()}
-                                            disabled={uploadingLogo}
-                                            className="w-full"
-                                        >
-                                            {uploadingLogo ? (
-                                                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                                            ) : (
-                                                <Upload className="w-3.5 h-3.5 mr-1.5" />
-                                            )}
-                                            上传图片
-                                        </Button>
-                                        {logoPreview && (
-                                            <Button
-                                                type="button"
-                                                variant="ghost"
-                                                size="sm"
-                                                onClick={async () => {
-                                                    try {
-                                                        await deleteLogo();
-                                                        setLogoPreview(null);
-                                                        setBranding((prev) => ({ ...prev, logo_url: null }));
-                                                        window.dispatchEvent(new CustomEvent("vibeworker-branding-updated"));
-                                                    } catch (err) {
-                                                        alert(err instanceof Error ? err.message : "删除失败");
-                                                    }
-                                                }}
-                                                className="w-full text-destructive hover:text-destructive"
-                                            >
-                                                <X className="w-3.5 h-3.5 mr-1.5" />
-                                                恢复默认
-                                            </Button>
-                                        )}
-                                        <p className="text-[10px] text-muted-foreground">
-                                            支持 PNG、JPG、SVG、WebP 格式，最大 2MB
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* 保存品牌设置按钮 */}
-                            <div className="pt-2">
-                                <Button
-                                    type="button"
-                                    size="sm"
-                                    onClick={async () => {
-                                        setSavingBranding(true);
-                                        try {
-                                            const updated = await updateBranding(brandingName);
-                                            setBranding(updated);
-                                            window.dispatchEvent(new CustomEvent("vibeworker-branding-updated"));
-                                        } catch (err) {
-                                            alert(err instanceof Error ? err.message : "保存失败");
-                                        } finally {
-                                            setSavingBranding(false);
-                                        }
-                                    }}
-                                    disabled={savingBranding || brandingName === branding.name}
-                                    className="w-full"
-                                >
-                                    {savingBranding ? (
-                                        <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                                    ) : (
-                                        <Save className="w-3.5 h-3.5 mr-1.5" />
-                                    )}
-                                    保存名称
-                                </Button>
-                            </div>
-                        </TabsContent>
 
                         {/* General Tab */}
                         <TabsContent value="general" className="space-y-4 mt-0 max-h-[60vh] overflow-y-auto pr-1">
@@ -895,6 +771,111 @@ export default function SettingsDialog() {
                                     </button>
                                 </div>
                             </div>
+
+                            {/* 品牌设置 */}
+                            <div className="space-y-3 mt-4 pt-3 border-t border-border/50">
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-medium text-muted-foreground">项目名称</label>
+                                    <input
+                                        type="text"
+                                        value={brandingName}
+                                        onChange={(e) => setBrandingName(e.target.value)}
+                                        placeholder="VibeWorker"
+                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                                    />
+                                </div>
+
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-medium text-muted-foreground">项目 LOGO</label>
+                                    <div className="flex items-start gap-3">
+                                        {/* LOGO 预览 */}
+                                        <div className="w-14 h-14 rounded-lg border border-border bg-muted/30 flex items-center justify-center overflow-hidden shrink-0">
+                                            {logoPreview ? (
+                                                <img
+                                                    src={logoPreview}
+                                                    alt="Logo preview"
+                                                    className="w-full h-full object-contain"
+                                                />
+                                            ) : (
+                                                <ImageIcon className="w-6 h-6 text-muted-foreground/40" />
+                                            )}
+                                        </div>
+
+                                        {/* 上传控制 */}
+                                        <div className="flex-1 space-y-1.5">
+                                            <input
+                                                ref={logoInputRef}
+                                                type="file"
+                                                accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                                                className="hidden"
+                                                onChange={async (e) => {
+                                                    const file = e.target.files?.[0];
+                                                    if (!file) return;
+                                                    setUploadingLogo(true);
+                                                    try {
+                                                        const url = await uploadLogo(file);
+                                                        const fullUrl = getLogoUrl(url);
+                                                        setLogoPreview(fullUrl + "?t=" + Date.now());
+                                                        const newBranding = { ...branding, logo_url: url };
+                                                        setBranding(newBranding);
+                                                        // 更新缓存并触发刷新
+                                                        localStorage.setItem("vibeworker_branding", JSON.stringify(newBranding));
+                                                        window.dispatchEvent(new CustomEvent("vibeworker-branding-updated"));
+                                                    } catch (err) {
+                                                        alert(err instanceof Error ? err.message : "上传失败");
+                                                    } finally {
+                                                        setUploadingLogo(false);
+                                                        if (logoInputRef.current) logoInputRef.current.value = "";
+                                                    }
+                                                }}
+                                            />
+                                            <div className="flex gap-2">
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => logoInputRef.current?.click()}
+                                                    disabled={uploadingLogo}
+                                                    className="flex-1 h-8"
+                                                >
+                                                    {uploadingLogo ? (
+                                                        <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                                                    ) : (
+                                                        <Upload className="w-3.5 h-3.5 mr-1.5" />
+                                                    )}
+                                                    上传
+                                                </Button>
+                                                {logoPreview && (
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onClick={async () => {
+                                                            try {
+                                                                await deleteLogo();
+                                                                setLogoPreview(null);
+                                                                const newBranding = { ...branding, logo_url: null };
+                                                                setBranding(newBranding);
+                                                                localStorage.setItem("vibeworker_branding", JSON.stringify(newBranding));
+                                                                window.dispatchEvent(new CustomEvent("vibeworker-branding-updated"));
+                                                            } catch (err) {
+                                                                alert(err instanceof Error ? err.message : "删除失败");
+                                                            }
+                                                        }}
+                                                        className="h-8 text-destructive hover:text-destructive"
+                                                    >
+                                                        <X className="w-3.5 h-3.5" />
+                                                    </Button>
+                                                )}
+                                            </div>
+                                            <p className="text-[10px] text-muted-foreground">
+                                                支持 PNG、JPG、SVG、WebP，最大 2MB
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
                             <div className="space-y-1.5 mt-4">
                                 <label className="text-xs font-medium text-muted-foreground">浏览器接管模式</label>
                                 <div className="grid grid-cols-2 gap-2">
